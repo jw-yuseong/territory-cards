@@ -27,7 +27,8 @@ export default function PublisherScreen() {
   }, [cards, query]);
 
   if (selected) {
-    return <CardDetail card={selected} onBack={() => setSelected(null)} />;
+    // key로 카드가 바뀔 때마다 화면을 완전히 새로 그림 (이전 입력값이 남지 않도록)
+    return <CardDetail key={selected.id} card={selected} onBack={() => setSelected(null)} />;
   }
 
   if (loading) return <div className="loading">카드 목록을 불러오는 중...</div>;

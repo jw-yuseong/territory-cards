@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-import { CONFIG_OK } from "./config";
-import { fetchIsAdmin } from "./api";
+import { CONFIG_OK, EMAIL_TO_ROLE, Role } from "./config";
 import Login from "./screens/Login";
 import PublisherScreen from "./screens/PublisherScreen";
 import ConductorScreen from "./screens/ConductorScreen";
@@ -13,7 +12,6 @@ type Tab = "publisher" | "conductor" | "admin";
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [tab, setTab] = useState<Tab>("publisher");
   const [bigFont, setBigFont] = useState(
     () => localStorage.getItem("fontMode") === "big"
@@ -30,10 +28,12 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  const role: Role = EMAIL_TO_ROLE[session?.user.email ?? ""] ?? "publisher";
+
+  // 역할이 바뀌면(다른 아이디로 로그인) 허용되지 않은 탭에 남지 않도록 초기화
   useEffect(() => {
-    if (session) fetchIsAdmin().then(setIsAdmin);
-    else setIsAdmin(false);
-  }, [session]);
+    setTab("publisher");
+  }, [session?.user.email]);
 
   function toggleFont() {
     const next = !bigFont;
@@ -69,6 +69,9 @@ export default function App() {
     );
   }
 
+  const showConductor = role === "conductor" || role === "admin";
+  const showAdmin = role === "admin";
+
   return (
     <>
       <header className="header">
@@ -79,32 +82,36 @@ export default function App() {
 
       <main className="screen">
         {tab === "publisher" && <PublisherScreen />}
-        {tab === "conductor" && <ConductorScreen />}
-        {tab === "admin" && isAdmin && <AdminScreen />}
+        {tab === "conductor" && showConductor && <ConductorScreen />}
+        {tab === "admin" && showAdmin && <AdminScreen />}
       </main>
 
-      <nav className="tabbar">
-        <button
-          className={tab === "publisher" ? "active" : ""}
-          onClick={() => setTab("publisher")}
-        >
-          봉사 기록
-        </button>
-        <button
-          className={tab === "conductor" ? "active" : ""}
-          onClick={() => setTab("conductor")}
-        >
-          인도자
-        </button>
-        {isAdmin && (
+      {(showConductor || showAdmin) && (
+        <nav className="tabbar">
           <button
-            className={tab === "admin" ? "active" : ""}
-            onClick={() => setTab("admin")}
+            className={tab === "publisher" ? "active" : ""}
+            onClick={() => setTab("publisher")}
           >
-            관리자
+            봉사 기록
           </button>
-        )}
-      </nav>
+          {showConductor && (
+            <button
+              className={tab === "conductor" ? "active" : ""}
+              onClick={() => setTab("conductor")}
+            >
+              인도자
+            </button>
+          )}
+          {showAdmin && (
+            <button
+              className={tab === "admin" ? "active" : ""}
+              onClick={() => setTab("admin")}
+            >
+              관리자
+            </button>
+          )}
+        </nav>
+      )}
     </>
   );
 }

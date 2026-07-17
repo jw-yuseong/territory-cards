@@ -41,13 +41,10 @@ export default function CardDetail({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // 카드를 새로 열 때마다 인도자/전도인은 빈 값, 호별일자는 오늘 날짜로 시작
   const [round, setRound] = useState(1);
-  const [conductorId, setConductorId] = useState(
-    () => localStorage.getItem("lastConductorId") ?? ""
-  );
-  const [publisherId, setPublisherId] = useState(
-    () => localStorage.getItem("lastPublisherId") ?? ""
-  );
+  const [conductorId, setConductorId] = useState("");
+  const [publisherId, setPublisherId] = useState("");
   const [date, setDate] = useState(today());
   const [cautionUnit, setCautionUnit] = useState<TerritoryUnit | null>(null);
   const [busyUnit, setBusyUnit] = useState<string | null>(null);
@@ -201,10 +198,7 @@ export default function CardDetail({
           <label>봉사 인도자</label>
           <select
             value={conductorId}
-            onChange={(e) => {
-              setConductorId(e.target.value);
-              localStorage.setItem("lastConductorId", e.target.value);
-            }}
+            onChange={(e) => setConductorId(e.target.value)}
           >
             <option value="">— 선택 —</option>
             {conductors.map((c) => (
@@ -218,10 +212,7 @@ export default function CardDetail({
           <label>전도인 (내 이름)</label>
           <select
             value={publisherId}
-            onChange={(e) => {
-              setPublisherId(e.target.value);
-              localStorage.setItem("lastPublisherId", e.target.value);
-            }}
+            onChange={(e) => setPublisherId(e.target.value)}
           >
             <option value="">— 선택 —</option>
             {publishers.map((p) => (
