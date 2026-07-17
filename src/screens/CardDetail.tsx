@@ -49,6 +49,27 @@ export default function CardDetail({
   const [cautionUnit, setCautionUnit] = useState<TerritoryUnit | null>(null);
   const [busyUnit, setBusyUnit] = useState<string | null>(null);
 
+  // 방문 기록/배정만 다시 불러오기 (다른 사람이 체크한 내용 반영)
+  async function refreshRecords() {
+    try {
+      const [v, a] = await Promise.all([fetchVisits(card.id), fetchAssignments(card.id)]);
+      setVisits(v);
+      setAssignments(a);
+    } catch {
+      // 새로고침 실패는 조용히 무시 (기존 화면 유지)
+    }
+  }
+
+  // 다른 앱/화면에 갔다가 돌아오면 자동으로 최신 기록을 불러옴
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible") refreshRecords();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.id]);
+
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -163,6 +184,7 @@ export default function CardDetail({
   if (loading) return <div className="loading">카드를 불러오는 중...</div>;
 
   const visitedCount = visitByUnit.size;
+  const pct = units.length > 0 ? Math.round((100 * visitedCount) / units.length) : 0;
 
   return (
     <div>
@@ -230,8 +252,13 @@ export default function CardDetail({
 
       {error && <div className="error-msg">{error}</div>}
 
-      <div className="section-title">
-        방문 체크 ({visitedCount}/{units.length})
+      <div className="row" style={{ margin: "18px 0 10px" }}>
+        <div className="section-title" style={{ margin: 0, flex: 1 }}>
+          방문 {visitedCount}/{units.length} ({pct}%)
+        </div>
+        <button className="btn-line" onClick={refreshRecords}>
+          새로고침
+        </button>
       </div>
       <div className="muted" style={{ marginBottom: 8 }}>
         방문한 집을 누르면 체크됩니다. ⚠ 버튼으로 주의사항을 설정합니다.
