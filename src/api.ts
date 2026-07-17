@@ -1,0 +1,155 @@
+import { supabase } from "./supabase";
+import type {
+  CardAssignment,
+  CardProgress,
+  CardSummary,
+  CautionType,
+  Conductor,
+  Publisher,
+  TerritoryUnit,
+  VisitRecord,
+} from "./types";
+
+function must<T>(data: T | null, error: { message: string } | null): T {
+  if (error) throw new Error(error.message);
+  if (data === null) throw new Error("데이터를 불러오지 못했습니다");
+  return data;
+}
+
+export async function fetchConductors(): Promise<Conductor[]> {
+  const { data, error } = await supabase
+    .from("conductors")
+    .select("id, name, is_admin, is_active")
+    .eq("is_active", true)
+    .order("name");
+  return must(data, error);
+}
+
+export async function fetchPublishers(): Promise<Publisher[]> {
+  const { data, error } = await supabase
+    .from("publishers")
+    .select("id, name, is_active")
+    .eq("is_active", true)
+    .order("name");
+  return must(data, error);
+}
+
+export async function fetchCautionTypes(): Promise<CautionType[]> {
+  const { data, error } = await supabase
+    .from("caution_types")
+    .select("id, label, is_do_not_call")
+    .order("id");
+  return must(data, error);
+}
+
+export async function fetchCardSummaries(): Promise<CardSummary[]> {
+  const { data, error } = await supabase
+    .from("v_card_summary")
+    .select("*")
+    .order("card_number")
+    .range(0, 999);
+  return must(data, error);
+}
+
+export async function fetchCardProgress(): Promise<CardProgress[]> {
+  const { data, error } = await supabase
+    .from("v_card_progress_wide")
+    .select("*")
+    .order("card_number")
+    .range(0, 999);
+  return must(data, error);
+}
+
+export async function fetchUnits(cardId: string): Promise<TerritoryUnit[]> {
+  const { data, error } = await supabase
+    .from("territory_units")
+    .select("id, card_id, seq_no, address_unit, caution_type_id, note")
+    .eq("card_id", cardId)
+    .order("seq_no");
+  return must(data, error);
+}
+
+export async function fetchVisits(cardId: string): Promise<VisitRecord[]> {
+  const { data, error } = await supabase
+    .from("visit_records")
+    .select("id, unit_id, round_no, conductor_id, publisher_id, visited_date, territory_units!inner(card_id)")
+    .eq("territory_units.card_id", cardId);
+  return must(data as unknown as VisitRecord[], error);
+}
+
+export async function fetchAssignments(cardId: string): Promise<CardAssignment[]> {
+  const { data, error } = await supabase
+    .from("card_assignments")
+    .select("id, card_id, round_no, publisher_id, assigned_by")
+    .eq("card_id", cardId);
+  return must(data, error);
+}
+
+export async function addVisit(v: {
+  unit_id: string;
+  round_no: number;
+  conductor_id: string;
+  publisher_id: string;
+  visited_date: string;
+}): Promise<VisitRecord> {
+  const { data, error } = await supabase
+    .from("visit_records")
+    .insert(v)
+    .select("id, unit_id, round_no, conductor_id, publisher_id, visited_date")
+    .single();
+  return must(data, error);
+}
+
+export async function removeVisit(visitId: string): Promise<void> {
+  const { error } = await supabase.from("visit_records").delete().eq("id", visitId);
+  if (error) throw new Error(error.message);
+}
+
+export async function setUnitCaution(unitId: string, cautionTypeId: number | null): Promise<void> {
+  const { error } = await supabase
+    .from("territory_units")
+    .update({ caution_type_id: cautionTypeId })
+    .eq("id", unitId);
+  if (error) throw new Error(error.message);
+}
+
+export async function assignCard(a: {
+  card_id: string;
+  round_no: number;
+  publisher_id: string;
+  assigned_by: string;
+}): Promise<void> {
+  const { error } = await supabase
+    .from("card_assignments")
+    .upsert(a, { onConflict: "card_id,round_no" });
+  if (error) throw new Error(error.message);
+}
+
+export async function unassignCard(cardId: string, roundNo: number): Promise<void> {
+  const { error } = await supabase
+    .from("card_assignments")
+    .delete()
+    .eq("card_id", cardId)
+    .eq("round_no", roundNo);
+  if (error) throw new Error(error.message);
+}
+
+export async function resetCard(cardId: string): Promise<void> {
+  const { error } = await supabase.rpc("reset_card", { p_card_id: cardId });
+  if (error) throw new Error(error.message);
+}
+
+/** 로그인한 계정이 관리자(conductors.is_admin)로 연결되어 있는지 */
+export async function fetchIsAdmin(): Promise<boolean> {
+  const { data: userData } = await supabase.auth.getUser();
+  const uid = userData.user?.id;
+  if (!uid) return false;
+  const { data, error } = await supabase
+    .from("conductors")
+    .select("id")
+    .eq("user_id", uid)
+    .eq("is_admin", true)
+    .limit(1);
+  if (error) return false;
+  return (data ?? []).length > 0;
+}
