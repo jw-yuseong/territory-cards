@@ -174,7 +174,8 @@ export default function CardDetail({
       </button>
 
       <h2 className="section-title">
-        {card.card_number}번 {card.name}
+        {card.legacy_number !== null ? `${card.legacy_number}번 ` : ""}
+        {card.name}
       </h2>
       {card.address_summary && <div className="muted">{card.address_summary}</div>}
 

@@ -20,10 +20,16 @@ export interface CautionType {
 export interface CardSummary {
   id: string;
   card_number: number;
+  legacy_number: number | null; // 기존 종이카드 번호 (화면 표시용, 중복 있음)
   name: string;
   address_summary: string | null;
   total_units: number;
   do_not_call_units: number;
+}
+
+/** 화면에 보여줄 카드 번호 = 기존 종이카드 번호 */
+export function displayNo(c: { legacy_number: number | null }): string {
+  return c.legacy_number === null ? "?" : String(c.legacy_number);
 }
 
 export interface TerritoryUnit {
@@ -55,6 +61,7 @@ export interface CardAssignment {
 export interface CardProgress {
   card_id: string;
   card_number: number;
+  legacy_number: number | null;
   name: string;
   total_units: number;
   r1_visited: number;

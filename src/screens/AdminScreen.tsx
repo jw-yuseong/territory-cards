@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { resetCard } from "../api";
 import { getCardSummaries } from "../lists";
 import type { CardSummary } from "../types";
+import { displayNo } from "../types";
 
 export default function AdminScreen() {
   const [cards, setCards] = useState<CardSummary[]>([]);
@@ -20,7 +21,7 @@ export default function AdminScreen() {
     const q = query.trim();
     if (!q) return cards;
     return cards.filter(
-      (c) => String(c.card_number).includes(q) || c.name.includes(q)
+      (c) => (c.legacy_number !== null && String(c.legacy_number).includes(q)) || c.name.includes(q)
     );
   }, [cards, query]);
 
@@ -29,7 +30,7 @@ export default function AdminScreen() {
     setError("");
     if (
       !window.confirm(
-        `${card.card_number}번 ${card.name} 카드를 초기화할까요?\n1~4회차 방문 기록과 배정이 모두 지워집니다.`
+        `${displayNo(card)}번 ${card.name} 카드를 초기화할까요?\n1~4회차 방문 기록과 배정이 모두 지워집니다.`
       )
     )
       return;
@@ -37,7 +38,7 @@ export default function AdminScreen() {
     setBusyId(card.id);
     try {
       await resetCard(card.id);
-      setMessage(`${card.card_number}번 ${card.name} 카드가 초기화되었습니다.`);
+      setMessage(`${displayNo(card)}번 ${card.name} 카드가 초기화되었습니다.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(
@@ -68,7 +69,7 @@ export default function AdminScreen() {
       {error && <div className="error-msg">{error}</div>}
       {filtered.slice(0, 50).map((c) => (
         <div key={c.id} className="card-item">
-          <span className="card-no">{c.card_number}</span>
+          <span className="card-no">{displayNo(c)}</span>
           <span className="name">{c.name}</span>
           <button
             className="btn-danger"

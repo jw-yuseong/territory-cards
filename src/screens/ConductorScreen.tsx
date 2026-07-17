@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { assignCard, fetchCardProgress, unassignCard } from "../api";
 import { getConductors, getPublishers } from "../lists";
 import type { CardProgress, Conductor, Publisher } from "../types";
-import { roundPublisher, roundVisited } from "../types";
+import { displayNo, roundPublisher, roundVisited } from "../types";
 
 type AssignTarget = { card: CardProgress; round: number };
 
@@ -73,7 +73,7 @@ export default function ConductorScreen() {
     const q = query.trim();
     if (!q) return progress;
     return progress.filter(
-      (p) => String(p.card_number).includes(q) || p.name.includes(q)
+      (p) => (p.legacy_number !== null && String(p.legacy_number).includes(q)) || p.name.includes(q)
     );
   }, [progress, query]);
 
@@ -99,7 +99,7 @@ export default function ConductorScreen() {
           style={{ width: "100%" }}
           onClick={() => setExpanded(isOpen ? null : p.card_id)}
         >
-          <span className="card-no">{p.card_number}</span>
+          <span className="card-no">{displayNo(p)}</span>
           <span style={{ flex: 1, fontWeight: 600, textAlign: "left" }}>
             {p.name}
             <div className="unit-meta">{p.total_units}집</div>
@@ -152,7 +152,7 @@ export default function ConductorScreen() {
   }
 
   async function doUnassign(p: CardProgress, r: number) {
-    if (!window.confirm(`${p.card_number}번 카드 ${r}회차 배정을 회수할까요?`)) return;
+    if (!window.confirm(`${displayNo(p)}번 카드(${p.name}) ${r}회차 배정을 회수할까요?`)) return;
     try {
       await unassignCard(p.card_id, r);
       patchProgress(p.card_id, r, null);
@@ -289,7 +289,7 @@ function AssignModal({
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>
-          {target.card.card_number}번 {target.card.name} — {target.round}회차 배정
+          {displayNo(target.card)}번 {target.card.name} — {target.round}회차 배정
         </h3>
         <div className="field">
           <label>전도인 (카드를 받을 사람)</label>

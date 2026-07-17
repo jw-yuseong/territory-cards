@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getCardSummaries } from "../lists";
 import type { CardSummary } from "../types";
+import { displayNo } from "../types";
 import CardDetail from "./CardDetail";
 
 export default function PublisherScreen() {
@@ -21,7 +22,7 @@ export default function PublisherScreen() {
     const q = query.trim();
     if (!q) return cards;
     return cards.filter(
-      (c) => String(c.card_number).includes(q) || c.name.includes(q)
+      (c) => (c.legacy_number !== null && String(c.legacy_number).includes(q)) || c.name.includes(q)
     );
   }, [cards, query]);
 
@@ -48,7 +49,7 @@ export default function PublisherScreen() {
       </div>
       {filtered.slice(0, 100).map((c) => (
         <button key={c.id} className="card-item" onClick={() => setSelected(c)}>
-          <span className="card-no">{c.card_number}</span>
+          <span className="card-no">{displayNo(c)}</span>
           <span className="name">{c.name}</span>
           <span className="units">{c.total_units}집</span>
         </button>

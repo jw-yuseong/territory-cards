@@ -42,22 +42,44 @@ export async function fetchCautionTypes(): Promise<CautionType[]> {
   return must(data, error);
 }
 
-export async function fetchCardSummaries(): Promise<CardSummary[]> {
+/** 기존 종이카드 번호 매핑 (card id -> legacy_number) */
+async function fetchLegacyMap(): Promise<Map<string, number | null>> {
   const { data, error } = await supabase
-    .from("v_card_summary")
-    .select("*")
-    .order("card_number")
+    .from("territory_cards")
+    .select("id, legacy_number")
     .range(0, 999);
-  return must(data, error);
+  const rows = must(data, error);
+  return new Map(rows.map((r) => [r.id as string, r.legacy_number as number | null]));
+}
+
+/** 기존 종이카드 번호 순 정렬 (번호 없는 카드는 맨 뒤, 중복은 새 번호 순) */
+function byLegacy(a: { legacy_number: number | null; card_number: number },
+                  b: { legacy_number: number | null; card_number: number }): number {
+  const la = a.legacy_number ?? Number.MAX_SAFE_INTEGER;
+  const lb = b.legacy_number ?? Number.MAX_SAFE_INTEGER;
+  return la - lb || a.card_number - b.card_number;
+}
+
+export async function fetchCardSummaries(): Promise<CardSummary[]> {
+  const [{ data, error }, legacy] = await Promise.all([
+    supabase.from("v_card_summary").select("*").range(0, 999),
+    fetchLegacyMap(),
+  ]);
+  const rows = must(data, error) as CardSummary[];
+  return rows
+    .map((r) => ({ ...r, legacy_number: legacy.get(r.id) ?? null }))
+    .sort(byLegacy);
 }
 
 export async function fetchCardProgress(): Promise<CardProgress[]> {
-  const { data, error } = await supabase
-    .from("v_card_progress_wide")
-    .select("*")
-    .order("card_number")
-    .range(0, 999);
-  return must(data, error);
+  const [{ data, error }, legacy] = await Promise.all([
+    supabase.from("v_card_progress_wide").select("*").range(0, 999),
+    fetchLegacyMap(),
+  ]);
+  const rows = must(data, error) as CardProgress[];
+  return rows
+    .map((r) => ({ ...r, legacy_number: legacy.get(r.card_id) ?? null }))
+    .sort(byLegacy);
 }
 
 export async function fetchUnits(cardId: string): Promise<TerritoryUnit[]> {
