@@ -49,6 +49,28 @@ export default function CardDetail({
   const [cautionUnit, setCautionUnit] = useState<TerritoryUnit | null>(null);
   const [busyUnit, setBusyUnit] = useState<string | null>(null);
 
+  // 회차에 맞게 인도자/전도인 칸 채우기:
+  // 그 회차에 기록이 있으면 마지막 기록의 이름으로, 없으면 빈 값으로 초기화
+  function prefillForRound(r: number, vs: VisitRecord[]) {
+    const roundVisits = vs.filter((x) => x.round_no === r);
+    if (roundVisits.length > 0) {
+      const latest = roundVisits.reduce((a, b) =>
+        a.checked_at > b.checked_at ? a : b
+      );
+      setConductorId(latest.conductor_id);
+      setPublisherId(latest.publisher_id);
+    } else {
+      setConductorId("");
+      setPublisherId("");
+    }
+    setDate(today());
+  }
+
+  function changeRound(r: number) {
+    setRound(r);
+    prefillForRound(r, visits);
+  }
+
   // 방문 기록/배정만 다시 불러오기 (다른 사람이 체크한 내용 반영)
   async function refreshRecords() {
     try {
@@ -91,24 +113,21 @@ export default function CardDetail({
         setCautions(ct);
         // 기본 회차 정하기:
         //  - 오늘 이미 이 카드에 기록했다면 그 회차 (봉사를 이어서 하는 경우)
-        //    + 마지막 기록의 인도자/전도인 이름을 그대로 채워둠
-        //  - 아니면 아직 방문 기록이 없는 첫 회차 (빈 값으로 새로 시작)
+        //  - 아니면 아직 방문 기록이 없는 첫 회차
+        // 이름 칸은 선택된 회차의 기록 기준으로 채우거나 비움
         const todayStr = today();
         const todayVisits = v.filter((x) => x.visited_date === todayStr);
+        let chosen: number;
         if (todayVisits.length > 0) {
-          setRound(Math.max(...todayVisits.map((x) => x.round_no)));
-          const latest = todayVisits.reduce((a, b) =>
-            a.checked_at > b.checked_at ? a : b
-          );
-          setConductorId(latest.conductor_id);
-          setPublisherId(latest.publisher_id);
+          chosen = Math.max(...todayVisits.map((x) => x.round_no));
         } else {
-          let r = 1;
-          for (; r < 4; r++) {
-            if (!v.some((x) => x.round_no === r)) break;
+          chosen = 1;
+          for (; chosen < 4; chosen++) {
+            if (!v.some((x) => x.round_no === chosen)) break;
           }
-          setRound(r);
         }
+        setRound(chosen);
+        prefillForRound(chosen, v);
         setLoading(false);
       } catch (e) {
         if (alive) {
@@ -215,7 +234,7 @@ export default function CardDetail({
           <button
             key={r}
             className={`${round === r ? "active" : ""} ${roundDone(r) ? "done" : ""}`}
-            onClick={() => setRound(r)}
+            onClick={() => changeRound(r)}
           >
             {r}회{roundDone(r) ? " ✓" : ""}
           </button>
