@@ -14,6 +14,30 @@ export default function PublisherScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // 뒤로가기(아이폰 쓸어넘기기 포함)를 누르면 카드 상세에서 목록으로 돌아감
+  useEffect(() => {
+    function onPop() {
+      setSelected(null);
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  function openCard(c: CardSummary) {
+    setSelected(c);
+    // 방문 기록에 한 단계를 쌓아서, 뒤로가기가 앱 이탈이 아니라 목록 복귀가 되게 함
+    window.history.pushState({ cardOpen: true }, "");
+  }
+
+  function closeCard() {
+    // '← 카드 목록으로' 버튼도 뒤로가기와 동일하게 처리 (쌓아둔 기록 정리)
+    if (window.history.state && window.history.state.cardOpen) {
+      window.history.back();
+    } else {
+      setSelected(null);
+    }
+  }
+
   useEffect(() => {
     Promise.all([getCardSummaries(), fetchCardProgress()])
       .then(([cs, pr]) => {
@@ -40,7 +64,7 @@ export default function PublisherScreen() {
 
   if (selected) {
     // key로 카드가 바뀔 때마다 화면을 완전히 새로 그림 (이전 입력값이 남지 않도록)
-    return <CardDetail key={selected.id} card={selected} onBack={() => setSelected(null)} />;
+    return <CardDetail key={selected.id} card={selected} onBack={closeCard} />;
   }
 
   if (loading) return <div className="loading">카드 목록을 불러오는 중...</div>;
@@ -68,7 +92,7 @@ export default function PublisherScreen() {
           ? [1, 2, 3, 4].filter((r) => roundVisited(pg, r) > 0)
           : [];
         return (
-          <button key={c.id} className="card-item" onClick={() => setSelected(c)}>
+          <button key={c.id} className="card-item" onClick={() => openCard(c)}>
             <span className="card-no">{displayNo(c)}</span>
             <span className="name">{c.name}</span>
             {doneRounds.length > 0 ? (
