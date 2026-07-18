@@ -40,10 +40,21 @@ export default function UnitEditor({
     }
     setVisitCountByUnit(counts);
     invalidateCardsCache();
+    return u;
   }
 
   useEffect(() => {
     reload()
+      .then((u) => {
+        // 처음 열 때만 동(그룹)을 모두 접어둠 (편집 중 새로고침에는 유지)
+        setCollapsed(
+          new Set(
+            buildGroups(u)
+              .filter((b) => b.group !== null)
+              .map((b) => b.key)
+          )
+        );
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps

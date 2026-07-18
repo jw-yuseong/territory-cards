@@ -132,6 +132,14 @@ export default function CardDetail({
         ]);
         if (!alive) return;
         setUnits(u);
+        // 카드를 열면 동(그룹)은 모두 접힌 상태로 시작
+        setCollapsed(
+          new Set(
+            buildGroups(u)
+              .filter((b) => b.group !== null)
+              .map((b) => b.key)
+          )
+        );
         setVisits(v);
         setAssignments(a);
         setConductors(cs);
