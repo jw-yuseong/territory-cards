@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addVisit,
   fetchAssignments,
+  fetchCardDest,
   fetchUnits,
   fetchVisits,
   removeVisit,
@@ -52,6 +53,25 @@ export default function CardDetail({
   const [memoText, setMemoText] = useState("");
   const [busyUnit, setBusyUnit] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [dest, setDest] = useState<{ lat: number; lng: number; label: string } | null>(null);
+
+  // 길찾기 도착점 좌표 (없으면 버튼 숨김)
+  useEffect(() => {
+    fetchCardDest(card.id).then(setDest).catch(() => setDest(null));
+  }, [card.id]);
+
+  // 네이버 길찾기: 왕국회관(노은서로142번길 20) -> 이 카드의 도착점
+  function openDirections() {
+    if (!dest) return;
+    const url =
+      "https://m.map.naver.com/route.nhn?menu=route" +
+      "&sname=" + encodeURIComponent("왕국회관") +
+      "&sx=127.3160871&sy=36.3738521" +
+      "&ename=" + encodeURIComponent(dest.label) +
+      "&ex=" + dest.lng + "&ey=" + dest.lat +
+      "&pathType=1&showMap=true";
+    window.open(url, "_blank");
+  }
 
   function toggleGroup(key: string) {
     setCollapsed((prev) => {
@@ -281,9 +301,20 @@ export default function CardDetail({
 
   return (
     <div>
-      <button className="btn-line" onClick={onBack}>
-        ← 카드 목록으로
-      </button>
+      <div className="row">
+        <button className="btn-line" onClick={onBack}>
+          ← 카드 목록으로
+        </button>
+        {dest && (
+          <button
+            className="btn-line"
+            style={{ marginLeft: "auto", background: "#03c75a", borderColor: "#03c75a", color: "#fff" }}
+            onClick={openDirections}
+          >
+            🧭 길찾기
+          </button>
+        )}
+      </div>
 
       <h2 className="section-title">
         {card.legacy_number !== null ? `${card.legacy_number}번 ` : ""}

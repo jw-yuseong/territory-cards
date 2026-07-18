@@ -135,6 +135,19 @@ export async function setUnitCaution(unitId: string, cautionTypeId: number | nul
   if (error) throw new Error(error.message);
 }
 
+/** 길찾기 도착점 좌표 (patch5 적용 전이거나 좌표가 없으면 null) */
+export async function fetchCardDest(
+  cardId: string
+): Promise<{ lat: number; lng: number; label: string } | null> {
+  const { data, error } = await supabase
+    .from("territory_cards")
+    .select("dest_lat, dest_lng, dest_label")
+    .eq("id", cardId)
+    .single();
+  if (error || !data || data.dest_lat == null || data.dest_lng == null) return null;
+  return { lat: data.dest_lat, lng: data.dest_lng, label: data.dest_label ?? "구역카드" };
+}
+
 /** 봉사자 메모 저장/삭제 (빈 문자열이면 삭제) */
 export async function setUnitNote(unitId: string, note: string | null): Promise<void> {
   const { error } = await supabase
