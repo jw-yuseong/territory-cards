@@ -8,6 +8,7 @@ import {
   setUnitNote,
 } from "../api";
 import { invalidateCardsCache } from "../lists";
+import { buildGroups } from "../groups";
 import type { CardSummary, TerritoryUnit } from "../types";
 import { displayNo } from "../types";
 
@@ -53,6 +54,18 @@ export default function UnitEditor({
     [units, selected]
   );
 
+  const blocks = useMemo(() => buildGroups(units), [units]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  function toggleGroup(key: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
   async function run(op: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -67,10 +80,18 @@ export default function UnitEditor({
 
   async function doDelete(unit: TerritoryUnit) {
     const visits = visitCountByUnit.get(unit.id) ?? 0;
-    const warn =
+    let warn =
       visits > 0
         ? `\n⚠ 이 집에는 방문 기록 ${visits}건이 있습니다. 함께 삭제됩니다.`
         : "";
+    // 동 제목이 저장된 집을 지우면 아래 집들의 동 표시가 사라짐 -> 경고
+    const block = blocks.find((b) => b.items.some((it) => it.unit.id === unit.id));
+    const item = block?.items.find((it) => it.unit.id === unit.id);
+    if (item?.definesGroup && block && block.items.length > 1) {
+      warn += `\n⚠ 이 집에는 동 제목(${block.group})이 저장되어 있습니다. 삭제하면 아래 ${
+        block.items.length - 1
+      }집의 동 표시가 사라지니, 삭제 후 다음 집 주소에 동 제목을 넣어 주세요.`;
+    }
     if (
       !window.confirm(
         `${unit.seq_no}번 "${unit.address_unit}" 집을 삭제할까요?\n뒤 집들의 번호가 하나씩 당겨집니다.${warn}`
@@ -107,29 +128,47 @@ export default function UnitEditor({
         + 맨 위에 집 추가
       </button>
 
-      {units.map((u) => {
-        const isSel = selected === u.id;
-        const visits = visitCountByUnit.get(u.id) ?? 0;
+      {blocks.map((b) => {
+        const isCollapsed = collapsed.has(b.key);
         return (
-          <div key={u.id}>
-            <div
-              className="unit-row"
-              style={isSel ? { borderColor: "var(--c-primary)", borderWidth: 2 } : undefined}
-            >
-              <button
-                className="unit-main"
-                onClick={() => setSelected(isSel ? null : u.id)}
-              >
-                <span className="card-no" style={{ minWidth: 44 }}>
-                  {u.seq_no}
-                </span>
-                <span style={{ whiteSpace: "pre-wrap" }}>
-                  <span className="unit-addr">{u.address_unit}</span>
-                  {visits > 0 && <div className="unit-meta">방문 기록 {visits}건</div>}
-                  {u.note && <div className="unit-meta">📝 {u.note}</div>}
-                </span>
+          <div key={b.key}>
+            {b.group && (
+              <button className="group-header" onClick={() => toggleGroup(b.key)}>
+                <span>{isCollapsed ? "▶" : "▼"}</span>
+                <span>{b.group}</span>
+                <span className="gh-count">{b.items.length}집</span>
               </button>
-            </div>
+            )}
+            {!isCollapsed &&
+              b.items.map(({ unit: u, label, group, definesGroup }) => {
+                const isSel = selected === u.id;
+                const visits = visitCountByUnit.get(u.id) ?? 0;
+                return (
+                  <div key={u.id}>
+                    <div
+                      className="unit-row"
+                      style={isSel ? { borderColor: "var(--c-primary)", borderWidth: 2 } : undefined}
+                    >
+                      <button
+                        className="unit-main"
+                        onClick={() => setSelected(isSel ? null : u.id)}
+                      >
+                        <span className="card-no" style={{ minWidth: 44 }}>
+                          {u.seq_no}
+                        </span>
+                        <span style={{ whiteSpace: "pre-wrap" }}>
+                          <span className="unit-addr">
+                            {group && <span className="unit-group-prefix">{group}</span>}
+                            {label}
+                          </span>
+                          {definesGroup && (
+                            <div className="unit-meta">📌 동 제목이 이 집 주소에 저장됨</div>
+                          )}
+                          {visits > 0 && <div className="unit-meta">방문 기록 {visits}건</div>}
+                          {u.note && <div className="unit-meta">📝 {u.note}</div>}
+                        </span>
+                      </button>
+                    </div>
             {isSel && selectedUnit && (
               <div className="row" style={{ margin: "0 0 8px 0", flexWrap: "wrap" }}>
                 <button
@@ -172,6 +211,9 @@ export default function UnitEditor({
                 )}
               </div>
             )}
+                  </div>
+                );
+              })}
           </div>
         );
       })}

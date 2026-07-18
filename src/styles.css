@@ -305,6 +305,26 @@ input, select {
 .prog-table td.tname { text-align: left; word-break: keep-all; overflow-wrap: anywhere; font-weight: 600; }
 .prog-table tr { cursor: pointer; }
 .prog-table tr:active { background: #eef4fb; }
+/* ---------- 동(그룹) 제목줄 ---------- */
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: #e3ecf5;
+  border: 1px solid var(--c-primary);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0 6px;
+  font-weight: 800;
+  color: var(--c-primary-dark);
+  min-height: var(--tap-h);
+  text-align: left;
+}
+.group-header .gh-count { margin-left: auto; font-size: var(--fs-small); font-weight: 600; color: var(--c-muted); }
+.group-header .gh-count.done { color: var(--c-ok); }
+.unit-group-prefix { color: var(--c-muted); font-weight: 500; font-size: var(--fs-small); margin-right: 6px; }
+
 .rate-0    { background: #eceff1; color: var(--c-muted); }
 .rate-low  { background: #e53935; color: #fff; font-weight: 700; }
 .rate-mid  { background: #fbc02d; color: #5d4300; font-weight: 700; }

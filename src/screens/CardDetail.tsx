@@ -9,6 +9,7 @@ import {
   setUnitNote,
 } from "../api";
 import { getCautionTypes, getConductors, getPublishers } from "../lists";
+import { buildGroups } from "../groups";
 import type {
   CardAssignment,
   CardSummary,
@@ -50,6 +51,16 @@ export default function CardDetail({
   const [cautionUnit, setCautionUnit] = useState<TerritoryUnit | null>(null);
   const [memoText, setMemoText] = useState("");
   const [busyUnit, setBusyUnit] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  function toggleGroup(key: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
 
   function openCautionModal(u: TerritoryUnit) {
     setCautionUnit(u);
@@ -176,6 +187,9 @@ export default function CardDetail({
     for (const c of cautions) m.set(c.id, c);
     return m;
   }, [cautions]);
+
+  // 동(그룹)별로 묶기
+  const blocks = useMemo(() => buildGroups(units), [units]);
 
   // 한 집이라도 방문 기록이 있으면 그 회차는 '방문완료' (✓ 표시)
   const roundDone = (r: number) => visits.some((v) => v.round_no === r);
@@ -335,43 +349,68 @@ export default function CardDetail({
         방문한 집을 누르면 체크됩니다. ⚠ 버튼으로 주의사항을 설정합니다.
       </div>
 
-      {units.map((u) => {
-        const visit = visitByUnit.get(u.id);
-        const caution = u.caution_type_id ? cautionById.get(u.caution_type_id) : null;
+      {blocks.map((b) => {
+        const isCollapsed = collapsed.has(b.key);
+        const checkedInGroup = b.items.filter((it) => visitByUnit.has(it.unit.id)).length;
         return (
-          <div
-            key={u.id}
-            className={`unit-row ${visit ? "visited" : ""} ${
-              caution?.is_do_not_call ? "dnc" : ""
-            }`}
-          >
-            <button
-              className="unit-main"
-              disabled={busyUnit === u.id}
-              onClick={() => toggleUnit(u)}
-            >
-              <span className="unit-check">{visit ? "✓" : ""}</span>
-              <span>
-                <span className="unit-addr">
-                  {u.seq_no}. {u.address_unit}
+          <div key={b.key}>
+            {b.group && (
+              <button className="group-header" onClick={() => toggleGroup(b.key)}>
+                <span>{isCollapsed ? "▶" : "▼"}</span>
+                <span>{b.group}</span>
+                <span
+                  className={`gh-count ${
+                    checkedInGroup >= b.items.length && b.items.length > 0 ? "done" : ""
+                  }`}
+                >
+                  {checkedInGroup}/{b.items.length}
+                  {checkedInGroup >= b.items.length && b.items.length > 0 ? " ✓" : ""}
                 </span>
-                {visit && (
-                  <div className="unit-meta">
-                    {visit.visited_date}{" "}
-                    {publishers.find((p) => p.id === visit.publisher_id)?.name ?? ""}
-                  </div>
-                )}
-                {u.note && <div className="unit-meta">📝 {u.note}</div>}
-              </span>
-            </button>
-            {caution && (
-              <span className={`caution-badge ${caution.is_do_not_call ? "" : "soft"}`}>
-                {caution.label}
-              </span>
+              </button>
             )}
-            <button className="unit-caution-btn" onClick={() => openCautionModal(u)}>
-              ⚠
-            </button>
+            {!isCollapsed &&
+              b.items.map(({ unit: u, label, group }) => {
+                const visit = visitByUnit.get(u.id);
+                const caution = u.caution_type_id ? cautionById.get(u.caution_type_id) : null;
+                return (
+                  <div
+                    key={u.id}
+                    className={`unit-row ${visit ? "visited" : ""} ${
+                      caution?.is_do_not_call ? "dnc" : ""
+                    }`}
+                  >
+                    <button
+                      className="unit-main"
+                      disabled={busyUnit === u.id}
+                      onClick={() => toggleUnit(u)}
+                    >
+                      <span className="unit-check">{visit ? "✓" : ""}</span>
+                      <span>
+                        <span className="unit-addr">
+                          {u.seq_no}.{" "}
+                          {group && <span className="unit-group-prefix">{group}</span>}
+                          {label}
+                        </span>
+                        {visit && (
+                          <div className="unit-meta">
+                            {visit.visited_date}{" "}
+                            {publishers.find((p) => p.id === visit.publisher_id)?.name ?? ""}
+                          </div>
+                        )}
+                        {u.note && <div className="unit-meta">📝 {u.note}</div>}
+                      </span>
+                    </button>
+                    {caution && (
+                      <span className={`caution-badge ${caution.is_do_not_call ? "" : "soft"}`}>
+                        {caution.label}
+                      </span>
+                    )}
+                    <button className="unit-caution-btn" onClick={() => openCautionModal(u)}>
+                      ⚠
+                    </button>
+                  </div>
+                );
+              })}
           </div>
         );
       })}
