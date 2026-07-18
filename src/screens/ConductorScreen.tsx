@@ -28,7 +28,6 @@ export default function ConductorScreen() {
   const [error, setError] = useState("");
   const [view, setView] = useState<"recommend" | "all">("recommend");
   const [query, setQuery] = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
   const [target, setTarget] = useState<AssignTarget | null>(null);
   const [tableRound, setTableRound] = useState<number | null>(null); // 전체 현황 표의 회차
 
@@ -93,77 +92,22 @@ export default function ConductorScreen() {
     );
   }, [progress, query]);
 
-  function roundChip(p: CardProgress, r: number) {
-    const visited = roundVisited(p, r);
-    const pub = roundPublisher(p, r);
-    // 한 집이라도 방문 기록이 있으면 완료(초록), 배정만 된 상태면 진행중(노랑)
-    const cls = visited > 0 ? "done" : pub ? "doing" : "";
+  // 추천 카드 화면용 간단한 한 줄 카드 (누르면 현재 회차 배정창)
+  function simpleCardRow(p: CardProgress) {
+    const pub = roundPublisher(p, currentRound);
     return (
-      <span key={r} className={`round-chip ${cls}`}>
-        {r}회 {visited}/{p.total_units}
-        {pub ? ` · ${pub}` : ""}
-      </span>
-    );
-  }
-
-  function cardRow(p: CardProgress, showAssignFor?: number) {
-    const isOpen = expanded === p.card_id;
-    return (
-      <div key={p.card_id} className="card-box" style={{ padding: 10 }}>
-        <button
-          className="unit-main"
-          style={{ width: "100%" }}
-          onClick={() => setExpanded(isOpen ? null : p.card_id)}
-        >
-          <span className="card-no">{displayNo(p)}</span>
-          <span style={{ flex: 1, fontWeight: 600, textAlign: "left" }}>
-            {p.name}
-            <div className="unit-meta">{p.total_units}집</div>
-          </span>
-          <span className="muted">{isOpen ? "▲" : "▼"}</span>
-        </button>
-
-        {!isOpen && <div className="progress-rounds">{[1, 2, 3, 4].map((r) => roundChip(p, r))}</div>}
-
-        {isOpen && (
-          <div>
-            {[1, 2, 3, 4].map((r) => {
-              const visited = roundVisited(p, r);
-              const pub = roundPublisher(p, r);
-              return (
-                <div key={r} className="row" style={{ marginTop: 8 }}>
-                  <span style={{ flex: 1 }}>
-                    {roundChip(p, r)}
-                  </span>
-                  <button className="btn-line" onClick={() => setTarget({ card: p, round: r })}>
-                    {pub ? "재배정" : "배정"}
-                  </button>
-                  {pub && (
-                    <button
-                      className="btn-line"
-                      style={{ color: "var(--c-danger)", borderColor: "var(--c-danger)" }}
-                      onClick={() => doUnassign(p, r)}
-                    >
-                      회수
-                    </button>
-                  )}
-                  {visited > 0 && <span className="muted"> </span>}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {showAssignFor !== undefined && !isOpen && (
-          <button
-            className="btn-primary"
-            style={{ marginTop: 8 }}
-            onClick={() => setTarget({ card: p, round: showAssignFor })}
-          >
-            {showAssignFor}회차 배정하기
-          </button>
-        )}
-      </div>
+      <button
+        key={p.card_id}
+        className="card-item"
+        onClick={() => setTarget({ card: p, round: currentRound })}
+      >
+        <span className="card-no">{displayNo(p)}</span>
+        <span className="name">
+          {p.name}
+          {pub && <div className="unit-meta">배정: {pub}</div>}
+        </span>
+        <span className="units">{p.total_units}집</span>
+      </button>
     );
   }
 
@@ -209,19 +153,19 @@ export default function ConductorScreen() {
         <div>
           <div className="notice">
             지금은 <b>{currentRound}회차</b> 진행 중입니다. 번호가 낮은 카드부터
-            순서대로 배정해 주세요.
+            순서대로 배정해 주세요. 카드를 누르면 배정할 수 있습니다.
           </div>
 
           <div className="section-title">추천 카드 (번호 낮은 순)</div>
           {recommended.length === 0 && (
             <div className="muted">배정할 수 있는 새 카드가 없습니다.</div>
           )}
-          {recommended.slice(0, 10).map((p) => cardRow(p, currentRound))}
+          {recommended.slice(0, 10).map((p) => simpleCardRow(p))}
 
           <div className="section-title">
             {currentRound}회차에 아직 방문 안 한 카드 ({remaining.length}개)
           </div>
-          {remaining.slice(0, 100).map((p) => cardRow(p))}
+          {remaining.slice(0, 100).map((p) => simpleCardRow(p))}
           {remaining.length > 100 && (
             <div className="muted">100개까지만 표시됩니다.</div>
           )}
