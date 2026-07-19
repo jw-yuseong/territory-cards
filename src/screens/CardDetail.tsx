@@ -423,7 +423,6 @@ export default function CardDetail({
                       <span className="unit-check">{visit ? "✓" : ""}</span>
                       <span>
                         <span className="unit-addr">
-                          {u.seq_no}.{" "}
                           {group && <span className="unit-group-prefix">{group}</span>}
                           {label}
                         </span>
@@ -454,9 +453,7 @@ export default function CardDetail({
       {cautionUnit && (
         <div className="modal-back" onClick={() => setCautionUnit(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>
-              {cautionUnit.seq_no}. {cautionUnit.address_unit}
-            </h3>
+            <h3>{cautionUnit.address_unit}</h3>
             <div className="muted" style={{ marginBottom: 6 }}>주의사항 (누르면 바로 저장됩니다)</div>
             {cautions.map((c) => (
               <button
