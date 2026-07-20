@@ -136,16 +136,15 @@ export async function setUnitCaution(unitId: string, cautionTypeId: number | nul
 }
 
 /** 길찾기 도착점 좌표 (patch5 적용 전이거나 좌표가 없으면 null) */
-export async function fetchCardDest(
-  cardId: string
-): Promise<{ lat: number; lng: number; label: string } | null> {
+/** 구역 시작점 카카오맵 링크 (엑셀 A6에 넣어둔 kko.to 링크, 없으면 null) */
+export async function fetchCardStartPoint(cardId: string): Promise<string | null> {
   const { data, error } = await supabase
     .from("territory_cards")
-    .select("dest_lat, dest_lng, dest_label")
+    .select("start_point_url")
     .eq("id", cardId)
     .single();
-  if (error || !data || data.dest_lat == null || data.dest_lng == null) return null;
-  return { lat: data.dest_lat, lng: data.dest_lng, label: data.dest_label ?? "구역카드" };
+  if (error || !data || !data.start_point_url) return null;
+  return data.start_point_url as string;
 }
 
 /** 봉사자 메모 저장/삭제 (빈 문자열이면 삭제) */

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addVisit,
   fetchAssignments,
-  fetchCardDest,
+  fetchCardStartPoint,
   fetchUnits,
   fetchVisits,
   removeVisit,
@@ -53,21 +53,17 @@ export default function CardDetail({
   const [memoText, setMemoText] = useState("");
   const [busyUnit, setBusyUnit] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [dest, setDest] = useState<{ lat: number; lng: number; label: string } | null>(null);
+  const [startUrl, setStartUrl] = useState<string | null>(null);
 
-  // 길찾기 도착점 좌표 (없으면 버튼 숨김)
+  // 구역 시작점 카카오맵 링크 (없으면 버튼 숨김)
   useEffect(() => {
-    fetchCardDest(card.id).then(setDest).catch(() => setDest(null));
+    fetchCardStartPoint(card.id).then(setStartUrl).catch(() => setStartUrl(null));
   }, [card.id]);
 
-  // 네이버 길찾기: 왕국회관(노은서로142번길 20) -> 이 카드의 도착점
-  // 최신 형식 .../출발/도착/-/car -> '자동차' 경로가 기본으로 선택됨
-  function openDirections() {
-    if (!dest) return;
-    const start = `127.3160871,36.3738521,${encodeURIComponent("왕국회관")}`;
-    const end = `${dest.lng},${dest.lat},${encodeURIComponent(dest.label)}`;
-    const url = `https://map.naver.com/p/directions/${start}/${end}/-/car`;
-    window.open(url, "_blank");
+  // 엑셀 A6에 넣어둔 카카오맵 시작점(kko.to)을 새 창으로 연다.
+  // 카카오맵에서 그 지점이 표시되고 '길찾기'로 바로 안내받을 수 있다.
+  function openStartPoint() {
+    if (startUrl) window.open(startUrl, "_blank");
   }
 
   function toggleGroup(key: string) {
@@ -302,13 +298,13 @@ export default function CardDetail({
         <button className="btn-line" onClick={onBack}>
           ← 카드 목록으로
         </button>
-        {dest && (
+        {startUrl && (
           <button
             className="btn-line"
-            style={{ marginLeft: "auto", background: "#03c75a", borderColor: "#03c75a", color: "#fff" }}
-            onClick={openDirections}
+            style={{ marginLeft: "auto", background: "#ffcd00", borderColor: "#ffcd00", color: "#3a1d1d" }}
+            onClick={openStartPoint}
           >
-            🧭 길찾기
+            📍 구역 시작점
           </button>
         )}
       </div>
