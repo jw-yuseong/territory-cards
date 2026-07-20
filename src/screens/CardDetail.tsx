@@ -92,6 +92,8 @@ export default function CardDetail({
       );
       setConductorId(latest.conductor_id);
       setPublisherId(latest.publisher_id);
+      // 이미 방문한 회차는 기록된 호별일자를 그대로 보여줌 (오늘 날짜로 덮지 않음)
+      setDate(latest.visited_date);
     } else {
       const assigned = asg.find((x) => x.round_no === r);
       if (assigned) {
@@ -101,8 +103,8 @@ export default function CardDetail({
         setConductorId("");
         setPublisherId("");
       }
+      setDate(today());
     }
-    setDate(today());
   }
 
   function changeRound(r: number) {
