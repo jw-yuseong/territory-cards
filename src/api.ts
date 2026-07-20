@@ -201,6 +201,14 @@ export async function resetCard(cardId: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** 모든 카드 초기화: 전체 방문 기록과 배정을 삭제 (관리자 화면 전용) */
+export async function resetAllCards(): Promise<void> {
+  const { error: e1 } = await supabase.from("visit_records").delete().gte("round_no", 1);
+  if (e1) throw new Error(e1.message);
+  const { error: e2 } = await supabase.from("card_assignments").delete().gte("round_no", 1);
+  if (e2) throw new Error(e2.message);
+}
+
 // ---- 구역관리자 전용: 카드의 집 편집 (DB 함수가 번호 재매김까지 처리) ----
 
 export async function adminUpdateUnitAddress(unitId: string, address: string): Promise<void> {

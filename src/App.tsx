@@ -38,7 +38,7 @@ export default function App() {
   }, [session?.user.email]);
 
   function changeFont(delta: number) {
-    const next = Math.min(5, Math.max(1, fontLevel + delta));
+    const next = Math.min(7, Math.max(1, fontLevel + delta));
     if (next === fontLevel) return;
     document.documentElement.classList.remove("font-" + fontLevel);
     document.documentElement.classList.add("font-" + next);
@@ -51,7 +51,7 @@ export default function App() {
       <button onClick={() => changeFont(-1)} disabled={fontLevel <= 1} aria-label="글씨 작게">
         가−
       </button>
-      <button onClick={() => changeFont(1)} disabled={fontLevel >= 5} aria-label="글씨 크게">
+      <button onClick={() => changeFont(1)} disabled={fontLevel >= 7} aria-label="글씨 크게">
         가＋
       </button>
     </>

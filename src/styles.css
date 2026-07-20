@@ -18,11 +18,13 @@
   --c-warn-bg: #fff7e0;
 }
 
-/* 글씨 크기 5단계 (기본 2단계) */
+/* 글씨 크기 7단계 (기본 2단계) */
 html.font-1 { --fs-base: 14px; --fs-small: 12px; --fs-title: 17px; --fs-big: 20px; --tap-h: 44px; }
 html.font-2 { --fs-base: 16px; --fs-small: 13px; --fs-title: 20px; --fs-big: 24px; --tap-h: 48px; }
 html.font-3 { --fs-base: 18px; --fs-small: 15px; --fs-title: 22px; --fs-big: 26px; --tap-h: 52px; }
 html.font-4 { --fs-base: 21px; --fs-small: 17px; --fs-title: 26px; --fs-big: 30px; --tap-h: 60px; }
+html.font-6 { --fs-base: 28px; --fs-small: 22px; --fs-title: 33px; --fs-big: 38px; --tap-h: 72px; }
+html.font-7 { --fs-base: 32px; --fs-small: 25px; --fs-title: 37px; --fs-big: 42px; --tap-h: 80px; }
 html.font-5 { --fs-base: 24px; --fs-small: 19px; --fs-title: 29px; --fs-big: 34px; --tap-h: 66px; }
 
 * { box-sizing: border-box; }

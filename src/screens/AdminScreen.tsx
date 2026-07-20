@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchMemoUnits, resetCard, setUnitNote } from "../api";
+import { fetchMemoUnits, resetAllCards, resetCard, setUnitNote } from "../api";
 import type { MemoUnit } from "../api";
 import { getCardSummaries } from "../lists";
 import type { CardSummary } from "../types";
@@ -14,6 +14,32 @@ export default function AdminScreen() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editCard, setEditCard] = useState<CardSummary | null>(null);
+  const [resettingAll, setResettingAll] = useState(false);
+
+  async function doResetAll() {
+    setMessage("");
+    setError("");
+    if (
+      !window.confirm(
+        "모든 카드를 초기화할까요?\n전체 카드의 1~4회차 방문 기록과 배정이 모두 지워집니다."
+      )
+    )
+      return;
+    if (
+      !window.confirm(
+        "⚠ 정말로 전체를 초기화합니까?\n되돌릴 수 없습니다. 한 번 더 확인해 주세요."
+      )
+    )
+      return;
+    setResettingAll(true);
+    try {
+      await resetAllCards();
+      setMessage("모든 카드가 초기화되었습니다.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setResettingAll(false);
+  }
 
   async function loadCards() {
     try {
@@ -111,6 +137,15 @@ export default function AdminScreen() {
         <b>편집</b>: 집 주소 수정, 삭제, 사이에 추가 / <b>초기화</b>: 1~4회차
         방문 기록과 배정 삭제 (집 주소·주의사항은 유지)
       </div>
+
+      <button
+        className="btn-danger"
+        style={{ width: "100%", marginBottom: 14 }}
+        disabled={resettingAll}
+        onClick={doResetAll}
+      >
+        {resettingAll ? "전체 초기화 중..." : "🗑 카드 모두 초기화 (전체)"}
+      </button>
 
       {memos.length > 0 && (
         <>
