@@ -1,0 +1,10 @@
+# Netlify 배포 설정 (저장소를 Netlify에 연결하면 자동 인식됨)
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# 단일 페이지 앱: 어떤 경로로 들어와도 index.html을 서빙
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
