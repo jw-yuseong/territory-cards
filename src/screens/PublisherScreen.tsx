@@ -10,6 +10,7 @@ export default function PublisherScreen() {
   const [progressMap, setProgressMap] = useState<Map<string, CardProgress>>(new Map());
   const [currentRound, setCurrentRound] = useState(1);
   const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false); // 전체보기 눌렀는지
   const [selected, setSelected] = useState<CardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -83,7 +84,10 @@ export default function PublisherScreen() {
         <input
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setShowAll(false); // 검색이 바뀌면 다시 50개로
+          }}
           placeholder="카드 번호 또는 구역 이름"
         />
       </div>
@@ -93,7 +97,7 @@ export default function PublisherScreen() {
           ? `검색 결과 ${filtered.length}개`
           : `${currentRound}회차 방문할 카드 ${filtered.length}개 (완료 카드는 검색으로)`}
       </div>
-      {filtered.map((c) => {
+      {(showAll ? filtered : filtered.slice(0, 50)).map((c) => {
         const pg = progressMap.get(c.id);
         // 회차별 완료 = 그 회차에 인도자·전도인 이름과 함께 기록된 방문이 있음
         // (이름 없이는 체크가 저장되지 않으므로 기록 존재 = 이름도 기록됨)
@@ -112,6 +116,15 @@ export default function PublisherScreen() {
           </button>
         );
       })}
+      {!showAll && filtered.length > 50 && (
+        <button
+          className="btn-line"
+          style={{ width: "100%", marginTop: 8 }}
+          onClick={() => setShowAll(true)}
+        >
+          전체보기 (나머지 {filtered.length - 50}개)
+        </button>
+      )}
     </div>
   );
 }
