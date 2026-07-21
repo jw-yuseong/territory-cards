@@ -30,6 +30,8 @@ export default function ConductorScreen() {
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState<AssignTarget | null>(null);
   const [tableRound, setTableRound] = useState<number | null>(null); // 전체 현황 표의 회차
+  const [showAllRemain, setShowAllRemain] = useState(false); // 추천뷰 미방문 목록 전체보기
+  const [showAllTable, setShowAllTable] = useState(false); // 전체 현황 표 전체보기
 
   async function load() {
     try {
@@ -165,7 +167,16 @@ export default function ConductorScreen() {
           <div className="section-title">
             {currentRound}회차에 아직 방문 안 한 카드 ({remaining.length}개)
           </div>
-          {remaining.map((p) => simpleCardRow(p))}
+          {(showAllRemain ? remaining : remaining.slice(0, 50)).map((p) => simpleCardRow(p))}
+          {!showAllRemain && remaining.length > 50 && (
+            <button
+              className="btn-line"
+              style={{ width: "100%", marginTop: 8 }}
+              onClick={() => setShowAllRemain(true)}
+            >
+              전체보기 (나머지 {remaining.length - 50}개)
+            </button>
+          )}
         </div>
       )}
 
@@ -198,7 +209,10 @@ export default function ConductorScreen() {
               <input
                 type="text"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setShowAllTable(false);
+                }}
                 placeholder="카드 번호 또는 구역 이름 검색"
               />
             </div>
@@ -218,7 +232,7 @@ export default function ConductorScreen() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((p) => {
+                {(showAllTable ? rows : rows.slice(0, 50)).map((p) => {
                   const visited = roundVisited(p, r);
                   const pct =
                     p.total_units > 0 ? (100 * visited) / p.total_units : 0;
@@ -237,6 +251,15 @@ export default function ConductorScreen() {
                 })}
               </tbody>
             </table>
+            {!showAllTable && rows.length > 50 && (
+              <button
+                className="btn-line"
+                style={{ width: "100%", marginTop: 8 }}
+                onClick={() => setShowAllTable(true)}
+              >
+                전체보기 (나머지 {rows.length - 50}개)
+              </button>
+            )}
           </div>
         );
       })()}

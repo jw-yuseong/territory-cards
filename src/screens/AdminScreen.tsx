@@ -15,6 +15,7 @@ export default function AdminScreen() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editCard, setEditCard] = useState<CardSummary | null>(null);
   const [resettingAll, setResettingAll] = useState(false);
+  const [showAll, setShowAll] = useState(false); // 카드 목록 전체보기
 
   async function doResetAll() {
     setMessage("");
@@ -183,13 +184,16 @@ export default function AdminScreen() {
         <input
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setShowAll(false);
+          }}
           placeholder="카드 번호 또는 구역 이름"
         />
       </div>
       {message && <div className="notice">{message}</div>}
       {error && <div className="error-msg">{error}</div>}
-      {filtered.map((c) => (
+      {(showAll ? filtered : filtered.slice(0, 50)).map((c) => (
         <div key={c.id} className="card-item">
           <span className="card-no">{displayNo(c)}</span>
           <span className="name">{c.name}</span>
@@ -205,6 +209,15 @@ export default function AdminScreen() {
           </button>
         </div>
       ))}
+      {!showAll && filtered.length > 50 && (
+        <button
+          className="btn-line"
+          style={{ width: "100%", marginTop: 8 }}
+          onClick={() => setShowAll(true)}
+        >
+          전체보기 (나머지 {filtered.length - 50}개)
+        </button>
+      )}
     </div>
   );
 }
