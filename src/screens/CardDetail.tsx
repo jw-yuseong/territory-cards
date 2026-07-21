@@ -86,23 +86,28 @@ export default function CardDetail({
   //  3) 둘 다 없으면 -> 빈 값
   function prefillForRound(r: number, vs: VisitRecord[], asg: CardAssignment[]) {
     const roundVisits = vs.filter((x) => x.round_no === r);
-    if (roundVisits.length > 0) {
+    const assigned = asg.find((x) => x.round_no === r);
+    // 인도자가 배정한 봉사인도자/전도인을 우선 자동 채움 (직접 선택 불필요)
+    if (assigned) {
+      setConductorId(assigned.assigned_by);
+      setPublisherId(assigned.publisher_id);
+    } else if (roundVisits.length > 0) {
       const latest = roundVisits.reduce((a, b) =>
         a.checked_at > b.checked_at ? a : b
       );
       setConductorId(latest.conductor_id);
       setPublisherId(latest.publisher_id);
-      // 이미 방문한 회차는 기록된 호별일자를 그대로 보여줌 (오늘 날짜로 덮지 않음)
+    } else {
+      setConductorId("");
+      setPublisherId("");
+    }
+    // 호별일자: 이미 방문한 회차는 기록된 날짜, 아니면 오늘
+    if (roundVisits.length > 0) {
+      const latest = roundVisits.reduce((a, b) =>
+        a.checked_at > b.checked_at ? a : b
+      );
       setDate(latest.visited_date);
     } else {
-      const assigned = asg.find((x) => x.round_no === r);
-      if (assigned) {
-        setConductorId(assigned.assigned_by);
-        setPublisherId(assigned.publisher_id);
-      } else {
-        setConductorId("");
-        setPublisherId("");
-      }
       setDate(today());
     }
   }
@@ -167,21 +172,23 @@ export default function CardDetail({
         //  3) 아니면 아직 방문 기록이 없는 첫 회차
         const todayStr = today();
         const todayVisits = v.filter((x) => x.visited_date === todayStr);
+        const assignedNoVisit = a
+          .filter((x) => !v.some((vv) => vv.round_no === x.round_no))
+          .map((x) => x.round_no)
+          .sort((x, y) => x - y)[0];
         let chosen: number;
         if (todayVisits.length > 0) {
           chosen = Math.max(...todayVisits.map((x) => x.round_no));
+        } else if (assignedNoVisit) {
+          // 인도자가 배정했는데 아직 방문 안 한 회차 -> 그 회차로 열림
+          chosen = assignedNoVisit;
+        } else if (a.length > 0) {
+          // 배정만 있는 회차(방문 완료 포함) -> 배정된 내용이 보이도록 그 회차
+          chosen = Math.min(...a.map((x) => x.round_no));
         } else {
-          const assignedNoVisit = a
-            .filter((x) => !v.some((vv) => vv.round_no === x.round_no))
-            .map((x) => x.round_no)
-            .sort((x, y) => x - y)[0];
-          if (assignedNoVisit) {
-            chosen = assignedNoVisit;
-          } else {
-            chosen = 1;
-            for (; chosen < 4; chosen++) {
-              if (!v.some((x) => x.round_no === chosen)) break;
-            }
+          chosen = 1;
+          for (; chosen < 4; chosen++) {
+            if (!v.some((x) => x.round_no === chosen)) break;
           }
         }
         setRound(chosen);
