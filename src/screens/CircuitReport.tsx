@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { buildCircuitReport } from "../api";
 import type { CircuitReportData } from "../api";
 
@@ -32,6 +32,54 @@ export default function CircuitReport({ onBack }: { onBack: () => void }) {
   const [data, setData] = useState<CircuitReportData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const printRef = useRef<HTMLDivElement>(null);
+
+  async function downloadPdf() {
+    const el = printRef.current;
+    if (!el) return;
+    setPdfBusy(true);
+    setError("");
+    try {
+      const [{ default: html2canvas }, jspdf] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf"),
+      ]);
+      // 캡처 시 데스크톱 폭으로 고정해 A4 비율에 맞춤
+      const prevW = el.style.width;
+      el.style.width = "780px";
+      const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff" });
+      el.style.width = prevW;
+
+      const pdf = new jspdf.jsPDF("p", "mm", "a4");
+      const pageW = 210;
+      const pageHpx = canvas.width * (297 / 210); // A4 한 장 높이(캔버스 px)
+      let rendered = 0;
+      let firstPage = true;
+      while (rendered < canvas.height) {
+        const sliceH = Math.min(pageHpx, canvas.height - rendered);
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sliceH;
+        const ctx = pageCanvas.getContext("2d");
+        if (ctx) {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+          ctx.drawImage(canvas, 0, rendered, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+        }
+        const img = pageCanvas.toDataURL("image/jpeg", 0.9);
+        const imgH = (sliceH * pageW) / canvas.width;
+        if (!firstPage) pdf.addPage();
+        pdf.addImage(img, "JPEG", 0, 0, pageW, imgH);
+        firstPage = false;
+        rendered += sliceH;
+      }
+      pdf.save(`구역배정기록_${start}_${end}.pdf`);
+    } catch (e) {
+      setError("PDF 저장 실패: " + (e instanceof Error ? e.message : String(e)));
+    }
+    setPdfBusy(false);
+  }
 
   async function generate() {
     setLoading(true);
@@ -70,18 +118,28 @@ export default function CircuitReport({ onBack }: { onBack: () => void }) {
         </button>
         {error && <div className="error-msg">{error}</div>}
         {data && (
-          <button
-            className="btn-line"
-            style={{ width: "100%", marginTop: 10, background: "#03c75a", borderColor: "#03c75a", color: "#fff" }}
-            onClick={() => window.print()}
-          >
-            🖨 인쇄 / PDF로 저장
-          </button>
+          <div className="row" style={{ marginTop: 10 }}>
+            <button
+              className="btn-line"
+              style={{ flex: 1 }}
+              onClick={() => window.print()}
+            >
+              🖨 인쇄
+            </button>
+            <button
+              className="btn-line"
+              style={{ flex: 1, background: "#c0392b", borderColor: "#c0392b", color: "#fff" }}
+              disabled={pdfBusy}
+              onClick={downloadPdf}
+            >
+              {pdfBusy ? "PDF 만드는 중..." : "⬇ PDF로 저장"}
+            </button>
+          </div>
         )}
       </div>
 
       {data && (
-        <div className="print-area">
+        <div className="print-area" ref={printRef}>
           <div className="report-head">
             <h1>구역 배정 기록 (순회 방문용)</h1>
             <div className="report-sub">
