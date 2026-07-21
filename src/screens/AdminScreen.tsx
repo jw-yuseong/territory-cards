@@ -4,7 +4,9 @@ import {
   fetchMemoUnits,
   insertCardAt,
   resetAllCards,
+  resetAllRound,
   resetCard,
+  resetCardRound,
   setUnitNote,
 } from "../api";
 import type { MemoUnit } from "../api";
@@ -30,6 +32,7 @@ export default function AdminScreen() {
   const [showAll, setShowAll] = useState(false); // 카드 목록 전체보기
   const [showNames, setShowNames] = useState(false); // 명단 관리 화면
   const [showReport, setShowReport] = useState(false); // 순회 방문 보고서
+  const [roundResetCard, setRoundResetCard] = useState<CardSummary | null>(null); // 회차 선택 초기화 대상
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<{ parsed: ParsedCard; file: File } | null>(null);
   const [insertPos, setInsertPos] = useState("");
@@ -197,29 +200,42 @@ export default function AdminScreen() {
     );
   }, [cards, query]);
 
-  async function doReset(card: CardSummary) {
+  // 개별 카드: 선택한 회차(또는 전체) 초기화
+  async function doResetCard(card: CardSummary, round: number | "all") {
     setMessage("");
     setError("");
+    const label = round === "all" ? "전체 회차" : `${round}회차`;
     if (
-      !window.confirm(
-        `${displayNo(card)}번 ${card.name} 카드를 초기화할까요?\n1~4회차 방문 기록과 배정이 모두 지워집니다.`
-      )
+      !window.confirm(`${displayNo(card)}번 ${card.name} 카드의 ${label} 기록을 삭제할까요?`)
     )
       return;
-    if (!window.confirm("정말 초기화합니까? 되돌릴 수 없습니다.")) return;
+    setRoundResetCard(null);
     setBusyId(card.id);
     try {
-      await resetCard(card.id);
-      setMessage(`${displayNo(card)}번 ${card.name} 카드가 초기화되었습니다.`);
+      if (round === "all") await resetCard(card.id);
+      else await resetCardRound(card.id, round);
+      setMessage(`${displayNo(card)}번 ${card.name} — ${label} 기록이 삭제되었습니다.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setError(
-        msg.includes("admin")
-          ? "관리자 권한이 없습니다. 관리자 계정으로 로그인했는지 확인해 주세요."
-          : msg
-      );
+      setError(msg.includes("admin") ? "관리자 권한이 필요합니다." : msg);
     }
     setBusyId(null);
+  }
+
+  // 전체 카드: 특정 회차 초기화
+  async function doResetAllRound(round: number) {
+    setMessage("");
+    setError("");
+    if (!window.confirm(`모든 카드의 ${round}회차 기록(방문·배정)을 삭제할까요?`)) return;
+    if (!window.confirm(`⚠ 정말 전체 ${round}회차를 삭제합니까? 되돌릴 수 없습니다.`)) return;
+    setResettingAll(true);
+    try {
+      await resetAllRound(round);
+      setMessage(`전체 카드의 ${round}회차 기록이 삭제되었습니다.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setResettingAll(false);
   }
 
   if (editCard) {
@@ -264,12 +280,58 @@ export default function AdminScreen() {
 
       <button
         className="btn-danger"
-        style={{ width: "100%", marginBottom: 14 }}
+        style={{ width: "100%", marginBottom: 8 }}
         disabled={resettingAll}
         onClick={doResetAll}
       >
-        {resettingAll ? "전체 초기화 중..." : "🗑 카드 모두 초기화 (전체)"}
+        {resettingAll ? "전체 초기화 중..." : "🗑 카드 모두 초기화 (전체 회차)"}
       </button>
+      <div className="muted" style={{ marginBottom: 6 }}>회차별 전체 초기화 (그 회차를 모든 카드에서 삭제):</div>
+      <div className="row" style={{ marginBottom: 14 }}>
+        {[1, 2, 3, 4].map((r) => (
+          <button
+            key={r}
+            className="btn-danger"
+            style={{ flex: 1 }}
+            disabled={resettingAll}
+            onClick={() => doResetAllRound(r)}
+          >
+            {r}회
+          </button>
+        ))}
+      </div>
+
+      {roundResetCard && (
+        <div className="modal-back" onClick={() => setRoundResetCard(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>
+              {displayNo(roundResetCard)}번 {roundResetCard.name} — 초기화할 회차
+            </h3>
+            <div className="muted" style={{ marginBottom: 8 }}>
+              선택한 회차의 방문 체크와 배정만 삭제됩니다.
+            </div>
+            {[1, 2, 3, 4].map((r) => (
+              <button
+                key={r}
+                className="choice-btn danger"
+                onClick={() => doResetCard(roundResetCard, r)}
+              >
+                {r}회차 기록만 삭제
+              </button>
+            ))}
+            <button
+              className="choice-btn danger"
+              style={{ borderWidth: 2 }}
+              onClick={() => doResetCard(roundResetCard, "all")}
+            >
+              전체 회차 삭제
+            </button>
+            <button className="choice-btn" style={{ marginTop: 8 }} onClick={() => setRoundResetCard(null)}>
+              취소
+            </button>
+          </div>
+        </div>
+      )}
 
       {preview && (
         <div className="modal-back" onClick={() => setPreview(null)}>
@@ -366,7 +428,7 @@ export default function AdminScreen() {
               className="btn-danger"
               style={{ flex: 1 }}
               disabled={busyId === c.id}
-              onClick={() => doReset(c)}
+              onClick={() => setRoundResetCard(c)}
             >
               {busyId === c.id ? "..." : "초기화"}
             </button>

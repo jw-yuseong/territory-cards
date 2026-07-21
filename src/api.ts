@@ -209,6 +209,38 @@ export async function resetAllCards(): Promise<void> {
   if (e2) throw new Error(e2.message);
 }
 
+/** 전체 카드에서 특정 회차만 초기화 (방문 체크 + 배정 삭제) */
+export async function resetAllRound(round: number): Promise<void> {
+  const { error: e1 } = await supabase.from("visit_records").delete().eq("round_no", round);
+  if (e1) throw new Error(e1.message);
+  const { error: e2 } = await supabase.from("card_assignments").delete().eq("round_no", round);
+  if (e2) throw new Error(e2.message);
+}
+
+/** 한 카드에서 특정 회차만 초기화 (방문 체크 + 배정 삭제) */
+export async function resetCardRound(cardId: string, round: number): Promise<void> {
+  const { data: units } = await supabase
+    .from("territory_units")
+    .select("id")
+    .eq("card_id", cardId)
+    .range(0, 999);
+  const unitIds = (units ?? []).map((u) => (u as { id: string }).id);
+  for (let i = 0; i < unitIds.length; i += 100) {
+    const { error } = await supabase
+      .from("visit_records")
+      .delete()
+      .eq("round_no", round)
+      .in("unit_id", unitIds.slice(i, i + 100));
+    if (error) throw new Error(error.message);
+  }
+  const { error } = await supabase
+    .from("card_assignments")
+    .delete()
+    .eq("card_id", cardId)
+    .eq("round_no", round);
+  if (error) throw new Error(error.message);
+}
+
 // ---- 구역관리자 전용: 명단(인도자/전도인) 추가·삭제 ----
 
 export async function addConductor(name: string): Promise<void> {
