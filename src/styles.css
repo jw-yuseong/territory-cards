@@ -346,3 +346,29 @@ input, select {
 .rate-low  { background: #e53935; color: #fff; font-weight: 700; }
 .rate-mid  { background: #fbc02d; color: #5d4300; font-weight: 700; }
 .rate-high { background: #43a047; color: #fff; font-weight: 700; }
+
+/* ---------- 순회 방문 보고서 (인쇄용) ---------- */
+.report-head { text-align: center; margin: 8px 0 14px; }
+.report-head h1 { font-size: 22px; margin: 0 0 4px; }
+.report-sub { color: var(--c-muted); font-size: 14px; }
+.report-summary { width: 100%; border-collapse: collapse; margin: 12px 0 18px; }
+.report-summary th, .report-summary td { border: 1px solid #333; padding: 8px 12px; font-size: 14px; }
+.report-summary th { background: #eef1f4; text-align: left; width: 55%; }
+.report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-table th, .report-table td { border: 1px solid #333; padding: 5px 8px; }
+.report-table th { background: #e3ecf5; }
+.report-table tr.done td { background: #eaf7ea; }
+
+@media screen {
+  .print-area { background: #fff; padding: 16px; border-radius: 12px; border: 1px solid var(--c-border); margin-top: 12px; }
+}
+@media print {
+  body { background: #fff; }
+  .header, .tabbar, .no-print { display: none !important; }
+  #root { max-width: none; }
+  .screen { padding: 0; }
+  .print-area { display: block; }
+  .report-table { font-size: 10px; }
+  .report-table th, .report-table td { padding: 2px 4px; }
+  @page { size: A4 portrait; margin: 12mm; }
+}

@@ -15,6 +15,7 @@ import type { CardSummary } from "../types";
 import { displayNo } from "../types";
 import UnitEditor from "./UnitEditor";
 import NameManager from "./NameManager";
+import CircuitReport from "./CircuitReport";
 
 export default function AdminScreen() {
   const [cards, setCards] = useState<CardSummary[]>([]);
@@ -28,6 +29,7 @@ export default function AdminScreen() {
   const [resettingAll, setResettingAll] = useState(false);
   const [showAll, setShowAll] = useState(false); // 카드 목록 전체보기
   const [showNames, setShowNames] = useState(false); // 명단 관리 화면
+  const [showReport, setShowReport] = useState(false); // 순회 방문 보고서
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<{ parsed: ParsedCard; file: File } | null>(null);
   const [insertPos, setInsertPos] = useState("");
@@ -226,6 +228,9 @@ export default function AdminScreen() {
   if (showNames) {
     return <NameManager onBack={() => setShowNames(false)} />;
   }
+  if (showReport) {
+    return <CircuitReport onBack={() => setShowReport(false)} />;
+  }
 
   return (
     <div>
@@ -242,6 +247,13 @@ export default function AdminScreen() {
           ⬆ 구역카드 업로드
         </button>
       </div>
+      <button
+        className="btn-line"
+        style={{ width: "100%", marginBottom: 10 }}
+        onClick={() => setShowReport(true)}
+      >
+        🖨 순회 방문용 서류 만들기
+      </button>
       <input
         ref={fileRef}
         type="file"

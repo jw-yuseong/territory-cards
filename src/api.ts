@@ -271,6 +271,93 @@ export async function deleteCard(cardId: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+// ---- 순회 방문용 서류(구역 배정 기록) 보고서 ----
+
+export interface CircuitRow {
+  legacy_number: number | null;
+  name: string;
+  publisher: string | null;
+  completed_date: string | null; // 기간 내 마지막 방문일
+}
+export interface CircuitReportData {
+  total: number;
+  firstDate: string | null; // 기간 내 가장 이른 방문일
+  lastDate: string | null;
+  completedCount: number;
+  rows: CircuitRow[];
+}
+
+/** 시작~끝 기간의 구역 배정/완료 현황을 집계 */
+export async function buildCircuitReport(start: string, end: string): Promise<CircuitReportData> {
+  // 1) 카드
+  const { data: cardsData, error: e1 } = await supabase
+    .from("territory_cards")
+    .select("id, legacy_number, name")
+    .order("legacy_number")
+    .range(0, 999);
+  if (e1) throw new Error(e1.message);
+  const cards = (cardsData ?? []) as { id: string; legacy_number: number | null; name: string }[];
+
+  // 2) 배정(전도인) — 카드별 가장 높은 회차의 배정 전도인
+  const { data: asgData } = await supabase
+    .from("card_assignments")
+    .select("card_id, round_no, publishers(name)")
+    .range(0, 4999);
+  const asgByCard = new Map<string, { round: number; name: string }>();
+  type AsgRaw = {
+    card_id: string;
+    round_no: number;
+    publishers: { name: string } | { name: string }[] | null;
+  };
+  for (const a of (asgData ?? []) as unknown as AsgRaw[]) {
+    const pub = Array.isArray(a.publishers) ? a.publishers[0] : a.publishers;
+    const cur = asgByCard.get(a.card_id);
+    if (pub && (!cur || a.round_no > cur.round)) {
+      asgByCard.set(a.card_id, { round: a.round_no, name: pub.name });
+    }
+  }
+
+  // 3) 기간 내 방문 기록 (페이지 처리)
+  const dateByCard = new Map<string, string>(); // card_id -> max visited_date
+  let firstDate: string | null = null;
+  let lastDate: string | null = null;
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from("visit_records")
+      .select("visited_date, territory_units!inner(card_id)")
+      .gte("visited_date", start)
+      .lte("visited_date", end)
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    const chunk = (data ?? []) as unknown as { visited_date: string; territory_units: { card_id: string } }[];
+    for (const v of chunk) {
+      const cid = v.territory_units.card_id;
+      const d = v.visited_date;
+      if (!dateByCard.has(cid) || d > (dateByCard.get(cid) as string)) dateByCard.set(cid, d);
+      if (firstDate === null || d < firstDate) firstDate = d;
+      if (lastDate === null || d > lastDate) lastDate = d;
+    }
+    if (chunk.length < 1000) break;
+    from += 1000;
+  }
+
+  const rows: CircuitRow[] = cards.map((c) => ({
+    legacy_number: c.legacy_number,
+    name: c.name,
+    publisher: asgByCard.get(c.id)?.name ?? null,
+    completed_date: dateByCard.get(c.id) ?? null,
+  }));
+
+  return {
+    total: cards.length,
+    firstDate,
+    lastDate,
+    completedCount: [...dateByCard.keys()].length,
+    rows,
+  };
+}
+
 // ---- 구역관리자 전용: 카드의 집 편집 (DB 함수가 번호 재매김까지 처리) ----
 
 export async function adminUpdateUnitAddress(unitId: string, address: string): Promise<void> {
