@@ -18,6 +18,7 @@ import { displayNo } from "../types";
 import UnitEditor from "./UnitEditor";
 import NameManager from "./NameManager";
 import CircuitReport from "./CircuitReport";
+import PasswordChange from "./PasswordChange";
 
 export default function AdminScreen() {
   const [cards, setCards] = useState<CardSummary[]>([]);
@@ -32,6 +33,7 @@ export default function AdminScreen() {
   const [showAll, setShowAll] = useState(false); // 카드 목록 전체보기
   const [showNames, setShowNames] = useState(false); // 명단 관리 화면
   const [showReport, setShowReport] = useState(false); // 순회 방문 보고서
+  const [showPw, setShowPw] = useState(false); // 비밀번호 변경
   const [roundResetCard, setRoundResetCard] = useState<CardSummary | null>(null); // 회차 선택 초기화 대상
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<{ parsed: ParsedCard; file: File } | null>(null);
@@ -247,6 +249,9 @@ export default function AdminScreen() {
   if (showReport) {
     return <CircuitReport onBack={() => setShowReport(false)} />;
   }
+  if (showPw) {
+    return <PasswordChange onBack={() => setShowPw(false)} />;
+  }
 
   return (
     <div>
@@ -269,6 +274,13 @@ export default function AdminScreen() {
         onClick={() => setShowReport(true)}
       >
         🖨 순회 방문용 서류 만들기
+      </button>
+      <button
+        className="btn-line"
+        style={{ width: "100%", marginBottom: 10 }}
+        onClick={() => setShowPw(true)}
+      >
+        🔑 계정 비밀번호 변경
       </button>
       <input
         ref={fileRef}
