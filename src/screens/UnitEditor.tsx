@@ -3,8 +3,10 @@ import {
   adminDeleteUnit,
   adminInsertUnit,
   adminUpdateUnitAddress,
+  fetchCardStartPoint,
   fetchUnits,
   fetchVisits,
+  setCardStartPoint,
   setUnitNote,
 } from "../api";
 import { invalidateCardsCache } from "../lists";
@@ -32,6 +34,12 @@ export default function UnitEditor({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [startUrl, setStartUrl] = useState<string | null>(null);
+  const [startModal, setStartModal] = useState(false);
+
+  useEffect(() => {
+    fetchCardStartPoint(card.id).then(setStartUrl).catch(() => setStartUrl(null));
+  }, [card.id]);
 
   async function reload() {
     const [u, v] = await Promise.all([fetchUnits(card.id), fetchVisits(card.id)]);
@@ -144,6 +152,23 @@ export default function UnitEditor({
         매겨집니다. 총 {units.length}집.
       </div>
       {error && <div className="error-msg">{error}</div>}
+
+      <div className="card-box" style={{ padding: 10 }}>
+        <div className="unit-meta" style={{ marginBottom: 6 }}>
+          📍 구역 시작점 링크: {startUrl ? "있음" : "없음"}
+          {startUrl && (
+            <span> — <a href={startUrl} target="_blank" rel="noreferrer">열어보기</a></span>
+          )}
+        </div>
+        <button
+          className="btn-line"
+          style={{ width: "100%" }}
+          disabled={busy}
+          onClick={() => setStartModal(true)}
+        >
+          📍 시작점 링크 수정
+        </button>
+      </div>
 
       <button
         className="btn-line"
@@ -279,6 +304,64 @@ export default function UnitEditor({
           }}
         />
       )}
+
+      {startModal && (
+        <StartLinkModal
+          initial={startUrl ?? ""}
+          busy={busy}
+          onCancel={() => setStartModal(false)}
+          onSave={async (url) => {
+            setStartModal(false);
+            setBusy(true);
+            setError("");
+            try {
+              await setCardStartPoint(card.id, url);
+              setStartUrl(url.trim() === "" ? null : url.trim());
+            } catch (e) {
+              setError(e instanceof Error ? e.message : String(e));
+            }
+            setBusy(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function StartLinkModal({
+  initial,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  initial: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (url: string) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <div className="modal-back" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>구역 시작점 링크 수정</h3>
+        <div className="muted" style={{ marginBottom: 6 }}>
+          카카오맵 링크(kko.to ...)를 붙여넣으세요. 비우고 저장하면 링크가 삭제됩니다.
+        </div>
+        <div className="field">
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="https://kko.to/..."
+          />
+        </div>
+        <button className="btn-primary" disabled={busy} onClick={() => onSave(value)}>
+          저장
+        </button>
+        <button className="choice-btn" style={{ marginTop: 8 }} onClick={onCancel}>
+          취소
+        </button>
+      </div>
     </div>
   );
 }

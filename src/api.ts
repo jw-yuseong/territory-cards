@@ -147,6 +147,16 @@ export async function fetchCardStartPoint(cardId: string): Promise<string | null
   return data.start_point_url as string;
 }
 
+/** 구역 시작점 링크 수정/삭제 (관리자 전용, 빈 값이면 삭제) */
+export async function setCardStartPoint(cardId: string, url: string | null): Promise<void> {
+  const value = url && url.trim() !== "" ? url.trim() : null;
+  const { error } = await supabase
+    .from("territory_cards")
+    .update({ start_point_url: value })
+    .eq("id", cardId);
+  if (error) throw new Error(error.message);
+}
+
 /** 봉사자 메모 저장/삭제 (빈 문자열이면 삭제) */
 export async function setUnitNote(unitId: string, note: string | null): Promise<void> {
   const { error } = await supabase
