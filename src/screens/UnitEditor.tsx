@@ -13,6 +13,7 @@ import { invalidateCardsCache } from "../lists";
 import { buildGroups } from "../groups";
 import type { CardSummary, TerritoryUnit } from "../types";
 import { displayNo } from "../types";
+import { friendlyError } from "../errors";
 
 type ModalState =
   | { mode: "edit"; unit: TerritoryUnit }
@@ -78,7 +79,7 @@ export default function UnitEditor({
           }, 250);
         }
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(friendlyError(e)))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id]);
@@ -107,7 +108,7 @@ export default function UnitEditor({
       await op();
       await reload();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setBusy(false);
   }
@@ -318,7 +319,7 @@ export default function UnitEditor({
               await setCardStartPoint(card.id, url);
               setStartUrl(url.trim() === "" ? null : url.trim());
             } catch (e) {
-              setError(e instanceof Error ? e.message : String(e));
+              setError(friendlyError(e));
             }
             setBusy(false);
           }}

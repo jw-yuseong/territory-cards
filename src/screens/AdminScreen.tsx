@@ -19,6 +19,7 @@ import UnitEditor from "./UnitEditor";
 import NameManager from "./NameManager";
 import CircuitReport from "./CircuitReport";
 import PasswordChange from "./PasswordChange";
+import { friendlyError } from "../errors";
 
 export default function AdminScreen() {
   const [cards, setCards] = useState<CardSummary[]>([]);
@@ -84,7 +85,7 @@ export default function AdminScreen() {
       setPreview(null);
       loadCards();
     } catch (e) {
-      setError("업로드 실패: " + (e instanceof Error ? e.message : String(e)));
+      setError("업로드 실패: " + (friendlyError(e)));
     }
     setUploadBusy(false);
   }
@@ -110,7 +111,7 @@ export default function AdminScreen() {
       setMessage(`${displayNo(c)}번 ${c.name} 카드가 삭제되었습니다.`);
       loadCards();
     } catch (e) {
-      setError("삭제 실패: " + (e instanceof Error ? e.message : String(e)));
+      setError("삭제 실패: " + (friendlyError(e)));
     }
     setBusyId(null);
   }
@@ -135,7 +136,7 @@ export default function AdminScreen() {
       await resetAllCards();
       setMessage("모든 카드가 초기화되었습니다.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setResettingAll(false);
   }
@@ -146,7 +147,7 @@ export default function AdminScreen() {
       setCards(cs);
       setMemos(ms);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
   }
 
@@ -165,7 +166,7 @@ export default function AdminScreen() {
       await setUnitNote(m.id, null);
       setMemos((ms) => ms.filter((x) => x.id !== m.id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
   }
 
@@ -218,7 +219,7 @@ export default function AdminScreen() {
       else await resetCardRound(card.id, round);
       setMessage(`${displayNo(card)}번 ${card.name} — ${label} 기록이 삭제되었습니다.`);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = friendlyError(e);
       setError(msg.includes("admin") ? "관리자 권한이 필요합니다." : msg);
     }
     setBusyId(null);
@@ -235,7 +236,7 @@ export default function AdminScreen() {
       await resetAllRound(round);
       setMessage(`전체 카드의 ${round}회차 기록이 삭제되었습니다.`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setResettingAll(false);
   }

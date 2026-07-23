@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { ID_TO_EMAIL, SUPABASE_ANON_KEY, SUPABASE_URL } from "../config";
+import { friendlyError } from "../errors";
 
 const IDS = Object.keys(ID_TO_EMAIL);
 
@@ -45,7 +46,7 @@ export default function PasswordChange({ onBack }: { onBack: () => void }) {
       setNewPw("");
       setNewPw2("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setBusy(false);
   }

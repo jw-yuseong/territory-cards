@@ -4,6 +4,7 @@ import { getCardSummaries } from "../lists";
 import type { CardProgress, CardSummary } from "../types";
 import { displayNo, roundVisited } from "../types";
 import CardDetail from "./CardDetail";
+import { friendlyError } from "../errors";
 
 export default function PublisherScreen() {
   const [cards, setCards] = useState<CardSummary[]>([]);
@@ -51,7 +52,7 @@ export default function PublisherScreen() {
         }
         setCurrentRound(r);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(friendlyError(e)))
       .finally(() => setLoading(false));
   }, []);
 

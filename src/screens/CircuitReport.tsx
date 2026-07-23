@@ -1,6 +1,7 @@
 import { Fragment, useRef, useState } from "react";
 import { buildCircuitReport } from "../api";
 import type { CircuitReportData } from "../api";
+import { friendlyError } from "../errors";
 
 const CONGREGATION = "유성중앙";
 
@@ -76,7 +77,7 @@ export default function CircuitReport({ onBack }: { onBack: () => void }) {
       }
       pdf.save(`구역배정기록_${start}_${end}.pdf`);
     } catch (e) {
-      setError("PDF 저장 실패: " + (e instanceof Error ? e.message : String(e)));
+      setError("PDF 저장 실패: " + (friendlyError(e)));
     }
     setPdfBusy(false);
   }
@@ -88,7 +89,7 @@ export default function CircuitReport({ onBack }: { onBack: () => void }) {
     try {
       setData(await buildCircuitReport(start, end));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setLoading(false);
   }

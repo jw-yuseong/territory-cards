@@ -20,6 +20,7 @@ import type {
   TerritoryUnit,
   VisitRecord,
 } from "../types";
+import { friendlyError } from "../errors";
 
 function today(): string {
   const d = new Date();
@@ -196,7 +197,7 @@ export default function CardDetail({
         setLoading(false);
       } catch (e) {
         if (alive) {
-          setError(e instanceof Error ? e.message : String(e));
+          setError(friendlyError(e));
           setLoading(false);
         }
       }
@@ -239,7 +240,7 @@ export default function CardDetail({
         await removeVisit(existing.id);
         setVisits((vs) => vs.filter((v) => v.id !== existing.id));
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(friendlyError(e));
       }
       setBusyUnit(null);
       return;
@@ -260,7 +261,7 @@ export default function CardDetail({
       });
       setVisits((vs) => [...vs, created]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setBusyUnit(null);
   }
@@ -277,7 +278,7 @@ export default function CardDetail({
       // 메모를 이어서 쓸 수 있도록 창은 열어둔 채 선택 상태만 갱신
       setCautionUnit({ ...cautionUnit, caution_type_id: cautionTypeId });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
       setCautionUnit(null);
     }
   }
@@ -291,7 +292,7 @@ export default function CardDetail({
         us.map((u) => (u.id === cautionUnit.id ? { ...u, note: value } : u))
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setCautionUnit(null);
   }

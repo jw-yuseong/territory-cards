@@ -3,6 +3,7 @@ import { assignCard, fetchCardProgress, unassignCard } from "../api";
 import { getConductors, getPublishers } from "../lists";
 import type { CardProgress, Conductor, Publisher } from "../types";
 import { displayNo, roundFirstDate, roundPublisher, roundVisited } from "../types";
+import { friendlyError } from "../errors";
 
 type AssignTarget = { card: CardProgress; round: number };
 
@@ -64,7 +65,7 @@ export default function ConductorScreen() {
       setConductors(cs);
       setPublishers(ps);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setLoading(false);
   }
@@ -139,7 +140,7 @@ export default function ConductorScreen() {
       await unassignCard(p.card_id, r);
       patchProgress(p.card_id, r, null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
   }
 
@@ -347,7 +348,7 @@ function AssignModal({
       localStorage.setItem("lastAssignerId", conductorId);
       onDone(publishers.find((p) => p.id === publisherId)?.name ?? "");
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onError(friendlyError(e));
       onClose();
     }
   }

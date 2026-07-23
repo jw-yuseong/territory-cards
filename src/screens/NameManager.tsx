@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { invalidateNameCaches } from "../lists";
 import type { Conductor, Publisher } from "../types";
+import { friendlyError } from "../errors";
 
 export default function NameManager({ onBack }: { onBack: () => void }) {
   const [conductors, setConductors] = useState<Conductor[]>([]);
@@ -27,7 +28,7 @@ export default function NameManager({ onBack }: { onBack: () => void }) {
   }
 
   useEffect(() => {
-    reload().catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    reload().catch((e) => setError(friendlyError(e)));
   }, []);
 
   async function run(op: () => Promise<void>, okMsg: string) {
@@ -39,7 +40,7 @@ export default function NameManager({ onBack }: { onBack: () => void }) {
       await reload();
       setMsg(okMsg);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
     setBusy(false);
   }
