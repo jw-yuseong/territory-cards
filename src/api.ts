@@ -16,6 +16,50 @@ function must<T>(data: T | null, error: { message: string } | null): T {
   return data;
 }
 
+// ---- 전체 백업 / 리뉴얼(복원)용 ----
+
+// 백업/복원 시 순서를 보존하기 위한 테이블별 정렬 기준
+const BACKUP_ORDER: Record<string, string[]> = {
+  territory_cards: ["card_number"],
+  territory_units: ["card_id", "seq_no"],
+};
+
+/** 한 테이블의 모든 행을 1000행 페이지로 나눠 전부 읽는다 (백업용). */
+export async function fetchAllRows(table: string): Promise<Record<string, unknown>[]> {
+  const all: Record<string, unknown>[] = [];
+  let from = 0;
+  for (;;) {
+    let q = supabase.from(table).select("*");
+    for (const col of BACKUP_ORDER[table] ?? []) q = q.order(col);
+    const { data, error } = await q.range(from, from + 999);
+    if (error) throw new Error(error.message);
+    const chunk = (data ?? []) as Record<string, unknown>[];
+    all.push(...chunk);
+    if (chunk.length < 1000) break;
+    from += 1000;
+  }
+  return all;
+}
+
+/** 구역 데이터(카드·집·배정·방문기록) 전부 삭제. 명단·주의사항은 보존 (관리자 전용). */
+export async function adminWipeTerritories(): Promise<void> {
+  const { error } = await supabase.rpc("admin_wipe_territories");
+  if (error) throw new Error(error.message);
+}
+
+/** 엑셀에서 읽은 행 묶음을 지정 테이블에 삽입 (관리자 전용). 삽입된 행 수 반환. */
+export async function adminBulkInsert(
+  table: string,
+  rows: Record<string, unknown>[]
+): Promise<number> {
+  const { data, error } = await supabase.rpc("admin_bulk_insert", {
+    p_table: table,
+    p_rows: rows,
+  });
+  if (error) throw new Error(error.message);
+  return (data as number) ?? 0;
+}
+
 export async function fetchConductors(): Promise<Conductor[]> {
   const { data, error } = await supabase
     .from("conductors")

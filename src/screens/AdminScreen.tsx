@@ -19,6 +19,7 @@ import UnitEditor from "./UnitEditor";
 import NameManager from "./NameManager";
 import CircuitReport from "./CircuitReport";
 import PasswordChange from "./PasswordChange";
+import DbBackup from "./DbBackup";
 import { friendlyError } from "../errors";
 
 export default function AdminScreen() {
@@ -35,6 +36,7 @@ export default function AdminScreen() {
   const [showNames, setShowNames] = useState(false); // 명단 관리 화면
   const [showReport, setShowReport] = useState(false); // 순회 방문 보고서
   const [showPw, setShowPw] = useState(false); // 비밀번호 변경
+  const [showBackup, setShowBackup] = useState(false); // DB 백업/리뉴얼
   const [roundResetCard, setRoundResetCard] = useState<CardSummary | null>(null); // 회차 선택 초기화 대상
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<{ parsed: ParsedCard; file: File } | null>(null);
@@ -253,6 +255,9 @@ export default function AdminScreen() {
   if (showPw) {
     return <PasswordChange onBack={() => setShowPw(false)} />;
   }
+  if (showBackup) {
+    return <DbBackup onBack={() => { setShowBackup(false); loadCards(); }} />;
+  }
 
   return (
     <div>
@@ -275,6 +280,13 @@ export default function AdminScreen() {
         onClick={() => setShowReport(true)}
       >
         🖨 순회 방문용 서류 만들기
+      </button>
+      <button
+        className="btn-line"
+        style={{ width: "100%", marginBottom: 10 }}
+        onClick={() => setShowBackup(true)}
+      >
+        💾 DB 백업 / 전체 리뉴얼
       </button>
       <button
         className="btn-line"
