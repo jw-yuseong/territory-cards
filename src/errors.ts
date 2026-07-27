@@ -21,14 +21,8 @@ export async function checkClockSkew(): Promise<number | null> {
   }
 }
 
-export function clockSkewMessage(skewSeconds: number): string {
-  const ahead = skewSeconds > 0;
-  const mins = Math.round(Math.abs(skewSeconds) / 60);
-  return (
-    `스마트폰의 시계가 실제 시간보다 약 ${mins}분 ${ahead ? "빠릅니다" : "느립니다"}.\n` +
-    "설정 → 일반 → 날짜 및 시간에서 '자동으로 설정'을 켜 주세요.\n" +
-    "그대로 두면 로그인 후 화면이 정상적으로 뜨지 않을 수 있습니다."
-  );
+export function clockSkewMessage(_skewSeconds: number): string {
+  return "화면이 정상적으로 뜨지 않으면, 로그아웃한 뒤 다시 로그인해 주세요.";
 }
 
 export { SKEW_WARN_SECONDS };
@@ -40,7 +34,7 @@ export function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
 
   if (/issued at future/i.test(msg) || /clock skew/i.test(msg)) {
-    return "스마트폰의 날짜·시간이 잘못 설정되어 있습니다.\n설정 → 일반 → 날짜 및 시간에서 '자동으로 설정'을 켠 뒤, 로그아웃하고 다시 로그인해 주세요.";
+    return "로그아웃한 뒤 다시 로그인해 주세요.";
   }
   if (/jwt expired/i.test(msg) || /invalid jwt/i.test(msg)) {
     return "로그인이 만료되었습니다. 로그아웃 후 다시 로그인해 주세요.";
