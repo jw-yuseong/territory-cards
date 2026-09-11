@@ -5,6 +5,7 @@ import type { CardProgress, CardSummary } from "../types";
 import { displayNo, roundVisited } from "../types";
 import CardDetail from "./CardDetail";
 import { friendlyError } from "../errors";
+import { hapticTap } from "../haptics";
 
 export default function PublisherScreen() {
   const [cards, setCards] = useState<CardSummary[]>([]);
@@ -26,6 +27,7 @@ export default function PublisherScreen() {
   }, []);
 
   function openCard(c: CardSummary) {
+    hapticTap();
     setSelected(c);
     // 방문 기록에 한 단계를 쌓아서, 뒤로가기가 앱 이탈이 아니라 목록 복귀가 되게 함
     window.history.pushState({ cardOpen: true }, "");

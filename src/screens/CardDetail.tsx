@@ -22,6 +22,7 @@ import type {
   VisitRecord,
 } from "../types";
 import { friendlyError } from "../errors";
+import { hapticCheck, hapticTap, hapticUncheck, hapticWarn } from "../haptics";
 
 function today(): string {
   const d = new Date();
@@ -234,6 +235,7 @@ export default function CardDetail({
   async function toggleUnit(unit: TerritoryUnit) {
     setError("");
     if (unit.letter_zone === "active") {
+      hapticWarn();
       setError(`${unit.address_unit}은(는) 편봉구역입니다. 봉사 대신 편지봉사로 진행되며 여기서는 체크할 수 없습니다.`);
       return;
     }
@@ -243,14 +245,17 @@ export default function CardDetail({
       setBusyUnit(unit.id);
       try {
         await removeVisit(existing.id);
+        hapticUncheck();
         setVisits((vs) => vs.filter((v) => v.id !== existing.id));
       } catch (e) {
+        hapticWarn();
         setError(friendlyError(e));
       }
       setBusyUnit(null);
       return;
     }
     if (!conductorId || !publisherId) {
+      hapticWarn();
       setError("이 카드는 배정된 봉사인도자·전도인이 없습니다. 인도자에게 배정을 요청하세요.");
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
@@ -264,8 +269,10 @@ export default function CardDetail({
         publisher_id: publisherId,
         visited_date: date,
       });
+      hapticCheck();
       setVisits((vs) => [...vs, created]);
     } catch (e) {
+      hapticWarn();
       setError(friendlyError(e));
     }
     setBusyUnit(null);
@@ -275,6 +282,7 @@ export default function CardDetail({
     if (!cautionUnit) return;
     try {
       await setUnitCaution(cautionUnit.id, cautionTypeId);
+      hapticTap();
       setUnits((us) =>
         us.map((u) =>
           u.id === cautionUnit.id ? { ...u, caution_type_id: cautionTypeId } : u
@@ -283,6 +291,7 @@ export default function CardDetail({
       // 메모를 이어서 쓸 수 있도록 창은 열어둔 채 선택 상태만 갱신
       setCautionUnit({ ...cautionUnit, caution_type_id: cautionTypeId });
     } catch (e) {
+      hapticWarn();
       setError(friendlyError(e));
       setCautionUnit(null);
     }
@@ -298,9 +307,11 @@ export default function CardDetail({
       return;
     try {
       await requestLetterZone(cautionUnit.id);
+      hapticTap();
       setUnits((us) => us.map((u) => (u.id === cautionUnit.id ? { ...u, letter_zone: "requested" } : u)));
       setCautionUnit({ ...cautionUnit, letter_zone: "requested" });
     } catch (e) {
+      hapticWarn();
       setError(friendlyError(e));
     }
   }
@@ -310,10 +321,12 @@ export default function CardDetail({
     const value = memoText.trim() === "" ? null : memoText.trim();
     try {
       await setUnitNote(cautionUnit.id, value);
+      hapticTap();
       setUnits((us) =>
         us.map((u) => (u.id === cautionUnit.id ? { ...u, note: value } : u))
       );
     } catch (e) {
+      hapticWarn();
       setError(friendlyError(e));
     }
     setCautionUnit(null);
