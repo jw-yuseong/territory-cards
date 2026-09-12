@@ -242,10 +242,10 @@ export default function CardDetail({
     const existing = visitByUnit.get(unit.id);
     if (existing) {
       if (!window.confirm(`${unit.address_unit} 방문 체크를 취소할까요?`)) return;
+      hapticUncheck(); // 네트워크 요청 전에 즉시 햅틱 피드백 (User Gesture 컨텍스트 유지)
       setBusyUnit(unit.id);
       try {
         await removeVisit(existing.id);
-        hapticUncheck();
         setVisits((vs) => vs.filter((v) => v.id !== existing.id));
       } catch (e) {
         hapticWarn();
@@ -260,6 +260,7 @@ export default function CardDetail({
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
+    hapticCheck(); // 네트워크 요청 전에 즉시 햅틱 피드백
     setBusyUnit(unit.id);
     try {
       const created = await addVisit({
@@ -269,7 +270,6 @@ export default function CardDetail({
         publisher_id: publisherId,
         visited_date: date,
       });
-      hapticCheck();
       setVisits((vs) => [...vs, created]);
     } catch (e) {
       hapticWarn();
@@ -280,9 +280,9 @@ export default function CardDetail({
 
   async function changeCaution(cautionTypeId: number | null) {
     if (!cautionUnit) return;
+    hapticTap();
     try {
       await setUnitCaution(cautionUnit.id, cautionTypeId);
-      hapticTap();
       setUnits((us) =>
         us.map((u) =>
           u.id === cautionUnit.id ? { ...u, caution_type_id: cautionTypeId } : u
@@ -305,9 +305,9 @@ export default function CardDetail({
       )
     )
       return;
+    hapticTap();
     try {
       await requestLetterZone(cautionUnit.id);
-      hapticTap();
       setUnits((us) => us.map((u) => (u.id === cautionUnit.id ? { ...u, letter_zone: "requested" } : u)));
       setCautionUnit({ ...cautionUnit, letter_zone: "requested" });
     } catch (e) {
@@ -318,10 +318,10 @@ export default function CardDetail({
 
   async function saveMemo() {
     if (!cautionUnit) return;
+    hapticTap();
     const value = memoText.trim() === "" ? null : memoText.trim();
     try {
       await setUnitNote(cautionUnit.id, value);
-      hapticTap();
       setUnits((us) =>
         us.map((u) => (u.id === cautionUnit.id ? { ...u, note: value } : u))
       );
