@@ -66,10 +66,25 @@ export default function PublisherScreen() {
         (c) => (c.legacy_number !== null && String(c.legacy_number).includes(q)) || c.name.includes(q)
       );
     }
-    // 검색이 없으면: 현재 회차에 아직 방문 안 한 카드만 순서대로 (완료 카드는 숨김)
-    return cards.filter((c) => {
+    // 검색이 없으면:
+    // - 이번 회차에 배정된 카드는 방문 수와 무관하게 항상 표시 (진행 중)
+    // - 배정되지 않은 카드는 아직 한 집도 방문 안 한 카드만 표시 (새 추천 카드)
+    const activeCards = cards.filter((c) => {
       const pg = progressMap.get(c.id);
-      return !pg || roundVisited(pg, currentRound) === 0;
+      if (!pg) return true;
+      const pub = roundPublisher(pg, currentRound);
+      return !!pub || roundVisited(pg, currentRound) === 0;
+    });
+
+    // 배정된 카드를 목록 최상단으로 끌어올림
+    return activeCards.sort((a, b) => {
+      const pgA = progressMap.get(a.id);
+      const pgB = progressMap.get(b.id);
+      const pubA = pgA ? roundPublisher(pgA, currentRound) : null;
+      const pubB = pgB ? roundPublisher(pgB, currentRound) : null;
+      if (pubA && !pubB) return -1;
+      if (!pubA && pubB) return 1;
+      return 0; // 나머지는 기본(byLegacy) 정렬 유지
     });
   }, [cards, query, progressMap, currentRound]);
 
