@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchCardProgress } from "../api";
 import { getCardSummaries } from "../lists";
 import type { CardProgress, CardSummary } from "../types";
-import { displayNo, roundVisited } from "../types";
+import { displayNo, roundPublisher, roundVisited } from "../types";
 import CardDetail from "./CardDetail";
 import { friendlyError } from "../errors";
 import { hapticTap } from "../haptics";
@@ -107,10 +107,14 @@ export default function PublisherScreen() {
         const doneRounds = pg
           ? [1, 2, 3, 4].filter((r) => roundVisited(pg, r) > 0)
           : [];
+        const pub = pg ? roundPublisher(pg, currentRound) : null;
         return (
           <button key={c.id} className="card-item" onClick={() => openCard(c)}>
             <span className="card-no">{displayNo(c)}</span>
-            <span className="name">{c.name}</span>
+            <span className="name">
+              {c.name}
+              {pub && <div className="unit-meta">배정: {pub}</div>}
+            </span>
             {doneRounds.length > 0 ? (
               <span className="done-badge">{doneRounds.join("·")}회 방문완료</span>
             ) : (
