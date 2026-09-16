@@ -66,11 +66,28 @@ export default function PublisherScreen() {
         (c) => (c.legacy_number !== null && String(c.legacy_number).includes(q)) || c.name.includes(q)
       );
     }
-    // 검색이 없으면: 현재 회차에 아직 방문 안 한(0집) 카드만 표시
-    // (한 집이라도 체크하면 기존처럼 목록에서 숨김)
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    const today = `${y}-${m}-${d}`;
+
     const activeCards = cards.filter((c) => {
       const pg = progressMap.get(c.id);
-      return !pg || roundVisited(pg, currentRound) === 0;
+      if (!pg) return true; // 방문 기록이 전혀 없는 카드 (노출)
+      
+      const pub = roundPublisher(pg, currentRound);
+      const visitedCount = roundVisited(pg, currentRound);
+
+      // 배정 안 된 카드는 방문 안 한(0집) 상태일 때만 표시 (추천 카드)
+      if (!pub) return visitedCount === 0;
+
+      // 배정된 카드의 경우:
+      // 1. 아직 방문 전(0집)이면 무조건 노출
+      // 2. 방문을 시작했어도 '오늘' 방문한 기록이 있으면 사라지지 않고 계속 표시 (봉사 중)
+      // 3. 예전에 방문을 시작했던 카드는 기존처럼 숨김
+      if (visitedCount === 0) return true;
+      return pg.last_visited_date === today;
     });
 
     // 배정된 카드를 목록 최상단으로 끌어올림
