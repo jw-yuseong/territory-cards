@@ -23,7 +23,7 @@ function rateClass(pct: number): string {
   return "rate-high";
 }
 
-export default function ConductorScreen() {
+export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean }) {
   const [progress, setProgress] = useState<CardProgress[]>([]);
   const [conductors, setConductors] = useState<Conductor[]>([]);
   const [publishers, setPublishers] = useState<Publisher[]>([]);
@@ -157,7 +157,7 @@ export default function ConductorScreen() {
         </button>
       </div>
 
-      {view === "letter" && <LetterMinistry publishers={publishers} />}
+      {view === "letter" && <LetterMinistry publishers={publishers} isAdmin={isAdmin} />}
 
       {view === "recommend" && (
         <div>

@@ -117,7 +117,7 @@ export default function App() {
           <div className="error-msg" style={{ whiteSpace: "pre-line" }}>{clockWarning}</div>
         )}
         {tab === "publisher" && <PublisherScreen />}
-        {tab === "conductor" && showConductor && <ConductorScreen />}
+        {tab === "conductor" && showConductor && <ConductorScreen isAdmin={showAdmin} />}
         {tab === "admin" && showAdmin && <AdminScreen />}
       </main>
 

@@ -2,8 +2,6 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { fetchLetterHistory, fetchLetterUnits, toggleLetterStop } from "../api";
 import type { LetterHistoryRow, LetterUnitStatus } from "../api";
 import { friendlyError } from "../errors";
-import { supabase } from "../supabase";
-import { EMAIL_TO_ROLE } from "../config";
 
 function fmtDate(d: string | null): string {
   if (!d) return "";
@@ -19,7 +17,7 @@ function rateClass(pct: number): string {
 
 type RoundInfo = { date: string; pub: string | null };
 
-export default function LetterStatus() {
+export default function LetterStatus({ isAdmin = false }: { isAdmin?: boolean }) {
   const [units, setUnits] = useState<LetterUnitStatus[]>([]);
   const [history, setHistory] = useState<LetterHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,7 +26,6 @@ export default function LetterStatus() {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   async function doToggleStop(unitId: string, current: boolean) {
     if (!isAdmin) return;
@@ -42,12 +39,6 @@ export default function LetterStatus() {
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) {
-        setIsAdmin(EMAIL_TO_ROLE[data.session.user.email ?? ""] === "admin");
-      }
-    });
-
     Promise.all([fetchLetterUnits(), fetchLetterHistory()])
       .then(([u, h]) => {
         setUnits(u);

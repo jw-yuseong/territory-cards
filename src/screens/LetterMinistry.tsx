@@ -55,7 +55,7 @@ function buildMessage(picked: LetterUnitStatus[], pubName: string): string {
   return [head, ...lines].join("\n");
 }
 
-export default function LetterMinistry({ publishers }: { publishers: Publisher[] }) {
+export default function LetterMinistry({ publishers, isAdmin = false }: { publishers: Publisher[], isAdmin?: boolean }) {
   const [mode, setMode] = useState<"pick" | "history" | "status">("pick");
   const [units, setUnits] = useState<LetterUnitStatus[]>([]);
   const [loading, setLoading] = useState(true);
@@ -171,7 +171,7 @@ export default function LetterMinistry({ publishers }: { publishers: Publisher[]
     return (
       <div>
         {subTabs}
-        <LetterStatus />
+        <LetterStatus isAdmin={isAdmin} />
       </div>
     );
   }
