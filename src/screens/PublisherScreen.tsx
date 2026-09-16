@@ -66,14 +66,11 @@ export default function PublisherScreen() {
         (c) => (c.legacy_number !== null && String(c.legacy_number).includes(q)) || c.name.includes(q)
       );
     }
-    // 검색이 없으면:
-    // - 이번 회차에 배정된 카드는 방문 수와 무관하게 항상 표시 (진행 중)
-    // - 배정되지 않은 카드는 아직 한 집도 방문 안 한 카드만 표시 (새 추천 카드)
+    // 검색이 없으면: 현재 회차에 아직 방문 안 한(0집) 카드만 표시
+    // (한 집이라도 체크하면 기존처럼 목록에서 숨김)
     const activeCards = cards.filter((c) => {
       const pg = progressMap.get(c.id);
-      if (!pg) return true;
-      const pub = roundPublisher(pg, currentRound);
-      return !!pub || roundVisited(pg, currentRound) === 0;
+      return !pg || roundVisited(pg, currentRound) === 0;
     });
 
     // 배정된 카드를 목록 최상단으로 끌어올림
