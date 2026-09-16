@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { fetchLetterHistory, fetchLetterUnits } from "../api";
+import { fetchLetterHistory, fetchLetterUnits, toggleLetterStop } from "../api";
 import type { LetterHistoryRow, LetterUnitStatus } from "../api";
 import { friendlyError } from "../errors";
 
@@ -26,6 +26,16 @@ export default function LetterStatus() {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+
+  async function doToggleStop(unitId: string, current: boolean) {
+    if (!window.confirm(`이 세대(호수)의 편지 발송을 ${current ? "다시 배정되도록 해제" : "중단(배정 제외)"}하시겠습니까?`)) return;
+    try {
+      await toggleLetterStop(unitId, !current);
+      setUnits((us) => us.map(u => u.id === unitId ? { ...u, is_stopped: !current } : u));
+    } catch (e) {
+      alert(friendlyError(e));
+    }
+  }
 
   useEffect(() => {
     Promise.all([fetchLetterUnits(), fetchLetterHistory()])
@@ -175,12 +185,34 @@ export default function LetterStatus() {
                           return (
                             <div
                               key={u.id}
-                              style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "3px 0", borderBottom: "1px solid var(--c-border)" }}
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                gap: 8,
+                                padding: "6px 0",
+                                borderBottom: "1px solid var(--c-border)",
+                                opacity: u.is_stopped ? 0.4 : 1,
+                              }}
                             >
-                              <span>{u.ho}호</span>
-                              <span style={{ color: info ? "var(--c-text)" : "#aaa" }}>
-                                {info ? `${fmtDate(info.date)} · ${info.pub ?? "?"}` : "미완료"}
-                              </span>
+                              <div>
+                                <span style={{ fontWeight: u.is_stopped ? "normal" : "bold" }}>
+                                  {u.ho}호
+                                </span>
+                                {u.is_stopped && <span style={{ marginLeft: 6, fontSize: "0.8em", color: "var(--c-danger)" }}>(중단됨)</span>}
+                              </div>
+                              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                <span style={{ color: info ? "var(--c-text)" : "#aaa", fontSize: "0.9em" }}>
+                                  {info ? `${fmtDate(info.date)} · ${info.pub ?? "?"}` : "미완료"}
+                                </span>
+                                <button
+                                  className="btn-line"
+                                  style={{ padding: "2px 6px", fontSize: "0.75em" }}
+                                  onClick={() => doToggleStop(u.id, u.is_stopped)}
+                                >
+                                  {u.is_stopped ? "해제" : "중단"}
+                                </button>
+                              </div>
                             </div>
                           );
                         })}

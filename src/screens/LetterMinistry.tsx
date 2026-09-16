@@ -17,9 +17,10 @@ function numMark(i: number): string {
   return i < CIRCLED.length ? CIRCLED[i] : `${i + 1}.`;
 }
 
-// 선정: 마지막 편지가 오래된 순(한 번도 안 쓴 집 최우선) + 한 건물당 1집
+// 선정: 중단된 집 제외 + 마지막 편지가 오래된 순(한 번도 안 쓴 집 최우선) + 한 건물당 1집
 function pickHouses(units: LetterUnitStatus[], n: number): LetterUnitStatus[] {
-  const sorted = [...units].sort((a, b) => {
+  const available = units.filter(u => !u.is_stopped);
+  const sorted = [...available].sort((a, b) => {
     const aw = a.last_written;
     const bw = b.last_written;
     if (aw === null && bw !== null) return -1;
@@ -90,8 +91,9 @@ export default function LetterMinistry({ publishers }: { publishers: Publisher[]
   );
   const pubName = publishers.find((p) => p.id === publisherId)?.name ?? "";
 
-  const buildings = useMemo(() => new Set(units.map((u) => u.building)).size, [units]);
-  const neverWritten = useMemo(() => units.filter((u) => u.last_written === null).length, [units]);
+  const availableUnits = useMemo(() => units.filter(u => !u.is_stopped), [units]);
+  const buildings = useMemo(() => new Set(availableUnits.map((u) => u.building)).size, [availableUnits]);
+  const neverWritten = useMemo(() => availableUnits.filter((u) => u.last_written === null).length, [availableUnits]);
 
   function doPick() {
     setDone("");

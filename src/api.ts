@@ -27,6 +27,7 @@ export type LetterUnitStatus = {
   seq_no: number;
   last_written: string | null; // 마지막 편지 날짜 (없으면 null = 한 번도 안 씀)
   letter_count: number;
+  is_stopped: boolean;
 };
 
 /** 편지봉사 세대 전체 + 세대별 마지막 편지날짜 (집 뽑기용). 1000행씩 페이지. */
@@ -36,7 +37,7 @@ export async function fetchLetterUnits(): Promise<LetterUnitStatus[]> {
   for (;;) {
     const { data, error } = await supabase
       .from("v_letter_unit_status")
-      .select("id, building, postal, ho, note, seq_no, last_written, letter_count")
+      .select("id, building, postal, ho, note, seq_no, last_written, letter_count, is_stopped")
       .order("seq_no")
       .range(from, from + 999);
     if (error) throw new Error(error.message);
@@ -47,6 +48,16 @@ export async function fetchLetterUnits(): Promise<LetterUnitStatus[]> {
   }
   return all;
 }
+
+/** 특정 세대의 편지 봉사 수취 거부 상태 변경 */
+export async function toggleLetterStop(unitId: string, stop: boolean): Promise<void> {
+  const { error } = await supabase.rpc("toggle_letter_stop", {
+    p_unit_id: unitId,
+    p_stop: stop,
+  });
+  if (error) throw new Error(error.message);
+}
+
 
 /** 뽑은 집들에 편지 이력(날짜+전도인) 기록. 기록된 건수 반환. */
 export async function letterAssign(
