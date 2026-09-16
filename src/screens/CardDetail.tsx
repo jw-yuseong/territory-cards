@@ -577,7 +577,7 @@ export default function CardDetail({
           <div className="modal" style={{ padding: "10px", width: "95%", maxWidth: "500px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
             <h3>🗺️ {card.legacy_number ?? card.card_number}번 구역 지도</h3>
             <img 
-              src={`/maps/371.webp`} 
+              src={`${import.meta.env.BASE_URL}maps/371.webp`} 
               alt={`구역 ${card.legacy_number ?? card.card_number} 지도`} 
               style={{ width: "100%", height: "auto", borderRadius: "8px", margin: "10px 0" }} 
             />
