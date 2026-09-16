@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { fetchLetterHistory, fetchLetterUnits, toggleLetterStop } from "../api";
 import type { LetterHistoryRow, LetterUnitStatus } from "../api";
 import { friendlyError } from "../errors";
+import { supabase } from "../supabase";
+import { EMAIL_TO_ROLE } from "../config";
 
 function fmtDate(d: string | null): string {
   if (!d) return "";
@@ -26,8 +28,10 @@ export default function LetterStatus() {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   async function doToggleStop(unitId: string, current: boolean) {
+    if (!isAdmin) return;
     if (!window.confirm(`이 세대(호수)의 편지 발송을 ${current ? "다시 배정되도록 해제" : "중단(배정 제외)"}하시겠습니까?`)) return;
     try {
       await toggleLetterStop(unitId, !current);
@@ -38,6 +42,12 @@ export default function LetterStatus() {
   }
 
   useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) {
+        setIsAdmin(EMAIL_TO_ROLE[data.session.user.email ?? ""] === "admin");
+      }
+    });
+
     Promise.all([fetchLetterUnits(), fetchLetterHistory()])
       .then(([u, h]) => {
         setUnits(u);
@@ -205,13 +215,15 @@ export default function LetterStatus() {
                                 <span style={{ color: info ? "var(--c-text)" : "#aaa", fontSize: "0.9em" }}>
                                   {info ? `${fmtDate(info.date)} · ${info.pub ?? "?"}` : "미완료"}
                                 </span>
-                                <button
-                                  className="btn-line"
-                                  style={{ padding: "2px 6px", fontSize: "0.75em" }}
-                                  onClick={() => doToggleStop(u.id, u.is_stopped)}
-                                >
-                                  {u.is_stopped ? "해제" : "중단"}
-                                </button>
+                                {isAdmin && (
+                                  <button
+                                    className="btn-line"
+                                    style={{ padding: "2px 6px", fontSize: "0.75em" }}
+                                    onClick={() => doToggleStop(u.id, u.is_stopped)}
+                                  >
+                                    {u.is_stopped ? "해제" : "중단"}
+                                  </button>
+                                )}
                               </div>
                             </div>
                           );
