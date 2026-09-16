@@ -57,6 +57,7 @@ export default function CardDetail({
   const [busyUnit, setBusyUnit] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [startUrl, setStartUrl] = useState<string | null>(null);
+  const [showMap, setShowMap] = useState(false);
 
   // 구역 시작점 카카오맵 링크 (없으면 버튼 숨김)
   useEffect(() => {
@@ -346,10 +347,19 @@ export default function CardDetail({
         <button className="btn-line" onClick={onBack}>
           ← 카드 목록으로
         </button>
+        {(String(card.legacy_number) === "371" || String(card.card_number) === "371") && (
+          <button
+            className="btn-line"
+            style={{ marginLeft: "auto", background: "#4caf50", borderColor: "#4caf50", color: "#fff" }}
+            onClick={() => setShowMap(true)}
+          >
+            🗺️ 구역 지도
+          </button>
+        )}
         {startUrl && (
           <button
             className="btn-line"
-            style={{ marginLeft: "auto", background: "#ffcd00", borderColor: "#ffcd00", color: "#3a1d1d" }}
+            style={{ marginLeft: (String(card.legacy_number) === "371" || String(card.card_number) === "371") ? "8px" : "auto", background: "#ffcd00", borderColor: "#ffcd00", color: "#3a1d1d" }}
             onClick={openStartPoint}
           >
             📍 구역 시작점
@@ -556,6 +566,22 @@ export default function CardDetail({
               메모 저장하고 닫기
             </button>
             <button className="choice-btn" style={{ marginTop: 8 }} onClick={() => setCautionUnit(null)}>
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showMap && (
+        <div className="modal-back" onClick={() => setShowMap(false)}>
+          <div className="modal" style={{ padding: "10px", width: "95%", maxWidth: "500px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+            <h3>🗺️ {card.legacy_number ?? card.card_number}번 구역 지도</h3>
+            <img 
+              src={`/maps/371.webp`} 
+              alt={`구역 ${card.legacy_number ?? card.card_number} 지도`} 
+              style={{ width: "100%", height: "auto", borderRadius: "8px", margin: "10px 0" }} 
+            />
+            <button className="btn-primary" onClick={() => setShowMap(false)}>
               닫기
             </button>
           </div>
