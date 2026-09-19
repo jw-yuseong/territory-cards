@@ -25,6 +25,7 @@ import { friendlyError } from "../errors";
 import { hapticCheck, hapticTap, hapticUncheck, hapticWarn } from "../haptics";
 import { supabase } from "../supabase";
 import { EMAIL_TO_ROLE, SUPABASE_URL } from "../config";
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
 function today(): string {
   const d = new Date();
@@ -661,18 +662,30 @@ export default function CardDetail({
             <h3>🗺️ {numToCheck}번 구역 지도</h3>
             
             {!imgFailed ? (
-              <img 
-                src={`${SUPABASE_URL}/storage/v1/object/public/maps/${numToCheck}.webp${mapTimestamp ? `?t=${mapTimestamp}` : ""}`}
-                onError={(e) => {
-                  if (e.currentTarget.src.includes('supabase.co')) {
-                    e.currentTarget.src = `${import.meta.env.BASE_URL}maps/${numToCheck}.webp`;
-                  } else {
-                    setImgFailed(true);
-                  }
-                }}
-                alt={`구역 ${numToCheck} 지도`} 
-                style={{ width: "100%", height: "auto", borderRadius: "8px", margin: "10px 0" }} 
-              />
+              <div style={{ margin: "10px 0", border: "1px solid #ddd", borderRadius: "8px", overflow: "hidden" }}>
+                <TransformWrapper
+                  initialScale={1}
+                  minScale={1}
+                  maxScale={4}
+                  centerOnInit={true}
+                  wheel={{ step: 0.1 }}
+                >
+                  <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
+                    <img 
+                      src={`${SUPABASE_URL}/storage/v1/object/public/maps/${numToCheck}.webp${mapTimestamp ? `?t=${mapTimestamp}` : ""}`}
+                      onError={(e) => {
+                        if (e.currentTarget.src.includes('supabase.co')) {
+                          e.currentTarget.src = `${import.meta.env.BASE_URL}maps/${numToCheck}.webp`;
+                        } else {
+                          setImgFailed(true);
+                        }
+                      }}
+                      alt={`구역 ${numToCheck} 지도`} 
+                      style={{ width: "100%", height: "auto", display: "block" }} 
+                    />
+                  </TransformComponent>
+                </TransformWrapper>
+              </div>
             ) : (
               <div style={{ padding: 20, background: "#eee", borderRadius: 8, margin: "10px 0", color: "#888" }}>
                 지도가 등록되지 않았습니다.
