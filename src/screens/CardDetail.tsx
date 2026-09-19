@@ -23,6 +23,8 @@ import type {
 } from "../types";
 import { friendlyError } from "../errors";
 import { hapticCheck, hapticTap, hapticUncheck, hapticWarn } from "../haptics";
+import { supabase } from "../supabase";
+import { EMAIL_TO_ROLE, SUPABASE_URL } from "../config";
 
 function today(): string {
   const d = new Date();
@@ -58,6 +60,79 @@ export default function CardDetail({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [startUrl, setStartUrl] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [mapTimestamp, setMapTimestamp] = useState("");
+  const [uploadingMap, setUploadingMap] = useState(false);
+  const [mapError, setMapError] = useState("");
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      const email = data.session?.user?.email;
+      if (email && EMAIL_TO_ROLE[email] === "admin") {
+        setIsAdmin(true);
+      }
+    });
+  }, []);
+
+  const numToCheck = card.legacy_number ?? card.card_number;
+
+  async function handleMapUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingMap(true);
+    setMapError("");
+    
+    try {
+      // 1. Convert to WebP using canvas
+      const webpBlob = await new Promise<Blob>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return reject(new Error("Canvas context error"));
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob((blob) => {
+              if (blob) resolve(blob);
+              else reject(new Error("WebP conversion failed"));
+            }, "image/webp", 0.85);
+          };
+          img.onerror = () => reject(new Error("지원하지 않는 이미지 형식입니다."));
+          img.src = event.target?.result as string;
+        };
+        reader.onerror = () => reject(new Error("파일 읽기 오류"));
+        reader.readAsDataURL(file);
+      });
+
+      // 2. Upload to Supabase Storage
+      const fileName = `${numToCheck}.webp`;
+      const { error } = await supabase.storage
+        .from("maps")
+        .upload(fileName, webpBlob, {
+          contentType: "image/webp",
+          upsert: true,
+        });
+
+      if (error) throw error;
+      
+      // Update image query string to bypass cache
+      setMapTimestamp(Date.now().toString());
+      setImgFailed(false);
+      alert("지도가 성공적으로 업데이트되었습니다.");
+    } catch (err: any) {
+      console.error(err);
+      setMapError(err.message || "지도 업로드 중 오류가 발생했습니다.");
+    } finally {
+      setUploadingMap(false);
+      // Reset input value to allow re-uploading the same file if needed
+      e.target.value = '';
+    }
+  }
 
   // 구역 시작점 카카오맵 링크 (없으면 버튼 숨김)
   useEffect(() => {
@@ -347,7 +422,6 @@ export default function CardDetail({
     [418, 428], [438, 449], [502, 519]
   ];
   
-  const numToCheck = card.legacy_number ?? card.card_number;
   const hasMap = mapRanges.some(([start, end]) => numToCheck >= start && numToCheck <= end);
 
   return (
@@ -356,7 +430,7 @@ export default function CardDetail({
         <button className="btn-line" onClick={onBack}>
           ← 카드 목록으로
         </button>
-        {hasMap && (
+        {(hasMap || isAdmin) && (
           <button
             className="btn-line"
             style={{ marginLeft: "auto", background: "#4caf50", borderColor: "#4caf50", color: "#fff" }}
@@ -368,7 +442,7 @@ export default function CardDetail({
         {startUrl && (
           <button
             className="btn-line"
-            style={{ marginLeft: hasMap ? "8px" : "auto", background: "#ffcd00", borderColor: "#ffcd00", color: "#3a1d1d" }}
+            style={{ marginLeft: (hasMap || isAdmin) ? "8px" : "auto", background: "#ffcd00", borderColor: "#ffcd00", color: "#3a1d1d" }}
             onClick={openStartPoint}
           >
             📍 구역 시작점
@@ -585,12 +659,43 @@ export default function CardDetail({
         <div className="modal-back" onClick={() => setShowMap(false)}>
           <div className="modal" style={{ padding: "10px", width: "95%", maxWidth: "500px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
             <h3>🗺️ {numToCheck}번 구역 지도</h3>
-            <img 
-              src={`${import.meta.env.BASE_URL}maps/${numToCheck}.webp`} 
-              alt={`구역 ${numToCheck} 지도`} 
-              style={{ width: "100%", height: "auto", borderRadius: "8px", margin: "10px 0" }} 
-            />
-            <button className="btn-primary" onClick={() => setShowMap(false)}>
+            
+            {!imgFailed ? (
+              <img 
+                src={`${SUPABASE_URL}/storage/v1/object/public/maps/${numToCheck}.webp${mapTimestamp ? `?t=${mapTimestamp}` : ""}`}
+                onError={(e) => {
+                  if (e.currentTarget.src.includes('supabase.co')) {
+                    e.currentTarget.src = `${import.meta.env.BASE_URL}maps/${numToCheck}.webp`;
+                  } else {
+                    setImgFailed(true);
+                  }
+                }}
+                alt={`구역 ${numToCheck} 지도`} 
+                style={{ width: "100%", height: "auto", borderRadius: "8px", margin: "10px 0" }} 
+              />
+            ) : (
+              <div style={{ padding: 20, background: "#eee", borderRadius: 8, margin: "10px 0", color: "#888" }}>
+                지도가 등록되지 않았습니다.
+              </div>
+            )}
+            
+            {mapError && <div className="error-msg">{mapError}</div>}
+            
+            {isAdmin && (
+              <div style={{ marginTop: 10, padding: 10, background: "#f0f0f0", borderRadius: 8, textAlign: "left" }}>
+                <div style={{ fontSize: 13, marginBottom: 5, fontWeight: "bold" }}>관리자용 지도 변경 (JPG/PNG/WEBP)</div>
+                <input 
+                  type="file" 
+                  accept="image/jpeg, image/png, image/webp" 
+                  onChange={handleMapUpload}
+                  disabled={uploadingMap}
+                  style={{ fontSize: 12, width: "100%" }}
+                />
+                {uploadingMap && <div style={{ fontSize: 12, marginTop: 4, color: "#666" }}>업로드 중... (자동 변환)</div>}
+              </div>
+            )}
+
+            <button className="btn-primary" style={{ marginTop: 15 }} onClick={() => setShowMap(false)}>
               닫기
             </button>
           </div>
