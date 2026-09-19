@@ -341,13 +341,22 @@ export default function CardDetail({
   const conductorName = conductors.find((c) => c.id === conductorId)?.name ?? "";
   const publisherName = publishers.find((p) => p.id === publisherId)?.name ?? "";
 
+  const mapRanges = [
+    [28, 35], [64, 71], [99, 105], [135, 146], [174, 180], [206, 210],
+    [275, 280], [299, 305], [331, 338], [364, 371], [392, 400],
+    [418, 428], [438, 449], [502, 519]
+  ];
+  
+  const numToCheck = card.legacy_number ?? card.card_number;
+  const hasMap = mapRanges.some(([start, end]) => numToCheck >= start && numToCheck <= end);
+
   return (
     <div>
       <div className="row">
         <button className="btn-line" onClick={onBack}>
           ← 카드 목록으로
         </button>
-        {(String(card.legacy_number) === "371" || String(card.card_number) === "371") && (
+        {hasMap && (
           <button
             className="btn-line"
             style={{ marginLeft: "auto", background: "#4caf50", borderColor: "#4caf50", color: "#fff" }}
@@ -359,7 +368,7 @@ export default function CardDetail({
         {startUrl && (
           <button
             className="btn-line"
-            style={{ marginLeft: (String(card.legacy_number) === "371" || String(card.card_number) === "371") ? "8px" : "auto", background: "#ffcd00", borderColor: "#ffcd00", color: "#3a1d1d" }}
+            style={{ marginLeft: hasMap ? "8px" : "auto", background: "#ffcd00", borderColor: "#ffcd00", color: "#3a1d1d" }}
             onClick={openStartPoint}
           >
             📍 구역 시작점
@@ -575,10 +584,10 @@ export default function CardDetail({
       {showMap && (
         <div className="modal-back" onClick={() => setShowMap(false)}>
           <div className="modal" style={{ padding: "10px", width: "95%", maxWidth: "500px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-            <h3>🗺️ {card.legacy_number ?? card.card_number}번 구역 지도</h3>
+            <h3>🗺️ {numToCheck}번 구역 지도</h3>
             <img 
-              src={`${import.meta.env.BASE_URL}maps/371.webp`} 
-              alt={`구역 ${card.legacy_number ?? card.card_number} 지도`} 
+              src={`${import.meta.env.BASE_URL}maps/${numToCheck}.webp`} 
+              alt={`구역 ${numToCheck} 지도`} 
               style={{ width: "100%", height: "auto", borderRadius: "8px", margin: "10px 0" }} 
             />
             <button className="btn-primary" onClick={() => setShowMap(false)}>
