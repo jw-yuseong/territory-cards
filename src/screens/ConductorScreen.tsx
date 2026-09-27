@@ -75,17 +75,23 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
     return 4;
   }, [progress]);
 
-  // 추천: 현재 회차에서 아직 방문 기록이 없고 배정도 안 된, 번호가 가장 낮은 카드들
-  const recommended = useMemo(
-    () =>
-      progress.filter(
-        (p) =>
-          p.total_units > 0 &&
-          roundVisited(p, currentRound) === 0 &&
-          !roundPublisher(p, currentRound)
-      ),
-    [progress, currentRound]
-  );
+  // 추천: 미완료 카드 우선, 그다음 방문 안 하고 배정도 안 된 가장 번호 낮은 카드들
+  const recommended = useMemo(() => {
+    const list = progress.filter((p) => {
+      if (p.total_units === 0) return false;
+      const isInc = incompleteNotes.has(`${p.card_id}-${currentRound}`);
+      if (isInc) return true;
+      return roundVisited(p, currentRound) === 0 && !roundPublisher(p, currentRound);
+    });
+
+    return list.sort((a, b) => {
+      const incA = incompleteNotes.has(`${a.card_id}-${currentRound}`);
+      const incB = incompleteNotes.has(`${b.card_id}-${currentRound}`);
+      if (incA && !incB) return -1;
+      if (!incA && incB) return 1;
+      return 0;
+    });
+  }, [progress, currentRound, incompleteNotes]);
 
   // 현재 회차에서 아직 방문 기록이 없는 모든 카드 (순서대로)
   const remaining = useMemo(

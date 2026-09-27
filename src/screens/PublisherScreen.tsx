@@ -102,8 +102,13 @@ export default function PublisherScreen() {
       return pg.last_visited_date === today;
     });
 
-    // 배정된 카드를 목록 최상단으로 끌어올림
+    // 미완료 카드를 1순위, 배정된 카드를 2순위로 목록 최상단에 올림
     return activeCards.sort((a, b) => {
+      const incA = incompleteNotes.has(a.id);
+      const incB = incompleteNotes.has(b.id);
+      if (incA && !incB) return -1;
+      if (!incA && incB) return 1;
+
       const pgA = progressMap.get(a.id);
       const pgB = progressMap.get(b.id);
       const pubA = pgA ? roundPublisher(pgA, currentRound) : null;
@@ -112,7 +117,7 @@ export default function PublisherScreen() {
       if (!pubA && pubB) return 1;
       return 0; // 나머지는 기본(byLegacy) 정렬 유지
     });
-  }, [cards, query, progressMap, currentRound]);
+  }, [cards, query, progressMap, incompleteNotes, currentRound]);
 
   if (selected) {
     // key로 카드가 바뀔 때마다 화면을 완전히 새로 그림 (이전 입력값이 남지 않도록)
