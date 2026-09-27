@@ -524,40 +524,38 @@ export default function CardDetail({
         </div>
       </div>
       
-      {numToCheck === 501 && (
-        <div className="card-box" style={{ marginTop: 12, background: "#fff3e0", borderColor: "#ffe0b2" }}>
-          {(() => {
-            const inc = incompleteNotes.find(n => n.round_no === round);
-            if (inc) {
-              return (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ color: "#e65100", fontWeight: "bold" }}>🚨 미완료 상태입니다.</div>
-                  <div style={{ fontSize: "14px", color: "#424242" }}>메모: {inc.note}</div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                    <button className="btn-line" style={{ flex: 1, padding: "8px 0" }} onClick={markIncomplete}>
-                      📝 메모 수정
-                    </button>
-                    <button className="btn-primary" style={{ flex: 1, padding: "8px 0" }} onClick={clearIncomplete}>
-                      ✅ 모두 완료 (해제)
-                    </button>
-                  </div>
-                </div>
-              );
-            } else {
-              return (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ fontSize: "14px", color: "#616161" }}>
-                    구역을 다 마치지 못했다면 보고해주세요. 누구나 이어서 할 수 있습니다.
-                  </div>
-                  <button className="btn-line" style={{ padding: "8px 0", borderColor: "#fb8c00", color: "#e65100" }} onClick={markIncomplete}>
-                    🚨 미완료 보고
+      <div className="card-box" style={{ marginTop: 12, background: "#fff3e0", borderColor: "#ffe0b2" }}>
+        {(() => {
+          const inc = incompleteNotes.find(n => n.round_no === round);
+          if (inc) {
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ color: "#e65100", fontWeight: "bold" }}>🚨 미완료 상태입니다.</div>
+                <div style={{ fontSize: "14px", color: "#424242" }}>메모: {inc.note}</div>
+                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                  <button className="btn-line" style={{ flex: 1, padding: "8px 0" }} onClick={markIncomplete}>
+                    📝 메모 수정
+                  </button>
+                  <button className="btn-primary" style={{ flex: 1, padding: "8px 0" }} onClick={clearIncomplete}>
+                    ✅ 모두 완료
                   </button>
                 </div>
-              );
-            }
-          })()}
-        </div>
-      )}
+              </div>
+            );
+          } else {
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: "14px", color: "#616161" }}>
+                  구역을 다 마치지 못했다면 보고해주세요. 누구나 이어서 할 수 있습니다.
+                </div>
+                <button className="btn-line" style={{ padding: "8px 0", borderColor: "#fb8c00", color: "#e65100" }} onClick={markIncomplete}>
+                  🚨 미완료 보고
+                </button>
+              </div>
+            );
+          }
+        })()}
+      </div>
 
       {error && <div className="error-msg">{error}</div>}
 
