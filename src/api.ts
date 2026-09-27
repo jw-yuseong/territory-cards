@@ -8,6 +8,7 @@ import type {
   Publisher,
   TerritoryUnit,
   VisitRecord,
+  CardIncompleteNote,
 } from "./types";
 
 function must<T>(data: T | null, error: { message: string } | null): T {
@@ -675,4 +676,36 @@ export async function fetchIsAdmin(): Promise<boolean> {
     .limit(1);
   if (error) return false;
   return (data ?? []).length > 0;
+}
+
+// ---- 미완료 구역카드 ----
+
+export async function fetchIncompleteNotes(): Promise<CardIncompleteNote[]> {
+  const { data, error } = await supabase
+    .from("card_incomplete_notes")
+    .select("*");
+  return must(data, error);
+}
+
+export async function upsertIncompleteNote(
+  card_id: string,
+  round_no: number,
+  note: string,
+  publisher_id: string | null
+): Promise<void> {
+  const { error } = await supabase
+    .from("card_incomplete_notes")
+    .upsert({ card_id, round_no, note, publisher_id, updated_at: new Date().toISOString() });
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteIncompleteNote(
+  card_id: string,
+  round_no: number
+): Promise<void> {
+  const { error } = await supabase
+    .from("card_incomplete_notes")
+    .delete()
+    .match({ card_id, round_no });
+  if (error) throw new Error(error.message);
 }

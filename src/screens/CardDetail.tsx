@@ -9,6 +9,9 @@ import {
   requestLetterZone,
   setUnitCaution,
   setUnitNote,
+  fetchIncompleteNotes,
+  upsertIncompleteNote,
+  deleteIncompleteNote,
 } from "../api";
 import { getCautionTypes, getConductors, getPublishers } from "../lists";
 import { buildGroups } from "../groups";
@@ -47,6 +50,7 @@ export default function CardDetail({
   const [conductors, setConductors] = useState<Conductor[]>([]);
   const [publishers, setPublishers] = useState<Publisher[]>([]);
   const [cautions, setCautions] = useState<CautionType[]>([]);
+  const [incompleteNotes, setIncompleteNotes] = useState<CardIncompleteNote[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -200,9 +204,14 @@ export default function CardDetail({
   // 방문 기록/배정만 다시 불러오기 (다른 사람이 체크한 내용 반영)
   async function refreshRecords() {
     try {
-      const [v, a] = await Promise.all([fetchVisits(card.id), fetchAssignments(card.id)]);
+      const [v, a, inc] = await Promise.all([
+        fetchVisits(card.id), 
+        fetchAssignments(card.id),
+        fetchIncompleteNotes()
+      ]);
       setVisits(v);
       setAssignments(a);
+      setIncompleteNotes(inc.filter(n => n.card_id === card.id));
     } catch {
       // 새로고침 실패는 조용히 무시 (기존 화면 유지)
     }
@@ -218,17 +227,42 @@ export default function CardDetail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [card.id]);
 
+  async function markIncomplete() {
+    const note = window.prompt("어디까지 봉사하셨는지 남겨주세요 (예: 302호까지)");
+    if (!note) return;
+    try {
+      await upsertIncompleteNote(card.id, round, note, publisherId || null);
+      const inc = await fetchIncompleteNotes();
+      setIncompleteNotes(inc.filter(n => n.card_id === card.id));
+      alert("미완료 보고가 저장되었습니다.");
+    } catch(e) {
+      setError(friendlyError(e));
+    }
+  }
+
+  async function clearIncomplete() {
+    if (!window.confirm("모두 완료하여 미완료 상태를 해제할까요?")) return;
+    try {
+      await deleteIncompleteNote(card.id, round);
+      const inc = await fetchIncompleteNotes();
+      setIncompleteNotes(inc.filter(n => n.card_id === card.id));
+    } catch(e) {
+      setError(friendlyError(e));
+    }
+  }
+
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [u, v, a, cs, ps, ct] = await Promise.all([
+        const [u, v, a, cs, ps, ct, inc] = await Promise.all([
           fetchUnits(card.id),
           fetchVisits(card.id),
           fetchAssignments(card.id),
           getConductors(),
           getPublishers(),
           getCautionTypes(),
+          fetchIncompleteNotes(),
         ]);
         if (!alive) return;
         setUnits(u);
@@ -245,6 +279,7 @@ export default function CardDetail({
         setConductors(cs);
         setPublishers(ps);
         setCautions(ct);
+        setIncompleteNotes(inc.filter(n => n.card_id === card.id));
         // 기본 회차 정하기:
         //  1) 오늘 이미 이 카드에 기록했다면 그 회차 (봉사를 이어서 하는 경우)
         //  2) 인도자가 배정해뒀는데 아직 기록이 없는 회차가 있으면 그 회차
@@ -488,6 +523,41 @@ export default function CardDetail({
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </div>
       </div>
+      
+      {card.card_number === 501 && (
+        <div className="card-box" style={{ marginTop: 12, background: "#fff3e0", borderColor: "#ffe0b2" }}>
+          {(() => {
+            const inc = incompleteNotes.find(n => n.round_no === round);
+            if (inc) {
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ color: "#e65100", fontWeight: "bold" }}>🚨 미완료 상태입니다.</div>
+                  <div style={{ fontSize: "14px", color: "#424242" }}>메모: {inc.note}</div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                    <button className="btn-line" style={{ flex: 1, padding: "8px 0" }} onClick={markIncomplete}>
+                      📝 메모 수정
+                    </button>
+                    <button className="btn-primary" style={{ flex: 1, padding: "8px 0" }} onClick={clearIncomplete}>
+                      ✅ 모두 완료 (해제)
+                    </button>
+                  </div>
+                </div>
+              );
+            } else {
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontSize: "14px", color: "#616161" }}>
+                    구역을 다 마치지 못했다면 보고해주세요. 누구나 이어서 할 수 있습니다.
+                  </div>
+                  <button className="btn-line" style={{ padding: "8px 0", borderColor: "#fb8c00", color: "#e65100" }} onClick={markIncomplete}>
+                    🚨 미완료 보고
+                  </button>
+                </div>
+              );
+            }
+          })()}
+        </div>
+      )}
 
       {error && <div className="error-msg">{error}</div>}
 

@@ -95,3 +95,11 @@ export function roundVisited(p: CardProgress, round: number): number {
 export function roundPublisher(p: CardProgress, round: number): string | null {
   return [p.r1_publisher, p.r2_publisher, p.r3_publisher, p.r4_publisher][round - 1] ?? null;
 }
+
+export interface CardIncompleteNote {
+  card_id: string;
+  round_no: number;
+  publisher_id: string | null;
+  note: string;
+  updated_at: string;
+}

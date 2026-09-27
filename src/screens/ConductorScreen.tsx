@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { assignCard, fetchCardProgress, unassignCard } from "../api";
+import { assignCard, fetchCardProgress, unassignCard, fetchIncompleteNotes } from "../api";
 import { getConductors, getPublishers } from "../lists";
-import type { CardProgress, Conductor, Publisher } from "../types";
+import type { CardProgress, Conductor, Publisher, CardIncompleteNote } from "../types";
 import { displayNo, roundFirstDate, roundPublisher, roundVisited } from "../types";
 import { friendlyError } from "../errors";
 import { matchName } from "../chosung";
@@ -27,6 +27,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
   const [progress, setProgress] = useState<CardProgress[]>([]);
   const [conductors, setConductors] = useState<Conductor[]>([]);
   const [publishers, setPublishers] = useState<Publisher[]>([]);
+  const [incompleteNotes, setIncompleteNotes] = useState<Map<string, CardIncompleteNote>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [view, setView] = useState<"recommend" | "all" | "letter">("recommend");
@@ -38,14 +39,20 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
 
   async function load() {
     try {
-      const [pr, cs, ps] = await Promise.all([
+      const [pr, cs, ps, inc] = await Promise.all([
         fetchCardProgress(),
         getConductors(),
         getPublishers(),
+        fetchIncompleteNotes(),
       ]);
       setProgress(pr);
       setConductors(cs);
       setPublishers(ps);
+      const incMap = new Map<string, CardIncompleteNote>();
+      for (const note of inc) {
+        incMap.set(`${note.card_id}-${note.round_no}`, note);
+      }
+      setIncompleteNotes(incMap);
     } catch (e) {
       setError(friendlyError(e));
     }
@@ -100,6 +107,8 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
   // 추천 카드 화면용 간단한 한 줄 카드 (누르면 현재 회차 배정창)
   function simpleCardRow(p: CardProgress) {
     const pub = roundPublisher(p, currentRound);
+    const incNote = incompleteNotes.get(`${p.card_id}-${currentRound}`);
+
     return (
       <button
         key={p.card_id}
@@ -110,6 +119,11 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
         <span className="name">
           {p.name}
           {pub && <div className="unit-meta">배정: {pub}</div>}
+          {incNote && (
+            <div className="unit-meta" style={{ color: "#e65100", fontWeight: "bold" }}>
+              🚨 미완료: {incNote.note}
+            </div>
+          )}
         </span>
         <span className="units">{p.total_units}집</span>
       </button>
@@ -244,12 +258,16 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
                   const visited = roundVisited(p, r);
                   const pct =
                     p.total_units > 0 ? (100 * visited) / p.total_units : 0;
+                  const incNote = incompleteNotes.get(`${p.card_id}-${r}`);
                   return (
                     <tr key={p.card_id} onClick={() => setTarget({ card: p, round: r })}>
                       <td style={{ fontWeight: 700, color: "var(--c-primary)" }}>
                         {displayNo(p)}
                       </td>
-                      <td className="tname">{p.name}</td>
+                      <td className="tname">
+                        {p.name}
+                        {incNote && <div style={{ fontSize: 11, color: "#e65100" }}>🚨미완료</div>}
+                      </td>
                       <td>{p.total_units}</td>
                       <td>{fmtDate(roundFirstDate(p, r))}</td>
                       <td>{roundPublisher(p, r) ?? ""}</td>

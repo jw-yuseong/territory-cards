@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchCardProgress } from "../api";
+import { fetchCardProgress, fetchIncompleteNotes } from "../api";
 import { getCardSummaries } from "../lists";
-import type { CardProgress, CardSummary } from "../types";
+import type { CardProgress, CardSummary, CardIncompleteNote } from "../types";
 import { displayNo, roundPublisher, roundVisited } from "../types";
 import CardDetail from "./CardDetail";
 import { friendlyError } from "../errors";
@@ -10,6 +10,7 @@ import { hapticTap } from "../haptics";
 export default function PublisherScreen() {
   const [cards, setCards] = useState<CardSummary[]>([]);
   const [progressMap, setProgressMap] = useState<Map<string, CardProgress>>(new Map());
+  const [incompleteNotes, setIncompleteNotes] = useState<Map<string, CardIncompleteNote>>(new Map());
   const [currentRound, setCurrentRound] = useState(1);
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false); // 전체보기 눌렀는지
@@ -43,16 +44,24 @@ export default function PublisherScreen() {
   }
 
   useEffect(() => {
-    Promise.all([getCardSummaries(), fetchCardProgress()])
-      .then(([cs, pr]) => {
+    Promise.all([getCardSummaries(), fetchCardProgress(), fetchIncompleteNotes()])
+      .then(([cs, pr, inc]) => {
         setCards(cs);
         setProgressMap(new Map(pr.map((p) => [p.card_id, p])));
-        // 현재 회차 = 아직 기록이 하나도 없는 카드가 남아있는 가장 낮은 회차
+        
         let r = 1;
         for (; r < 4; r++) {
           if (pr.some((p) => p.total_units > 0 && roundVisited(p, r) === 0)) break;
         }
         setCurrentRound(r);
+        
+        const incMap = new Map<string, CardIncompleteNote>();
+        for (const note of inc) {
+          if (note.round_no === r) {
+            incMap.set(note.card_id, note);
+          }
+        }
+        setIncompleteNotes(incMap);
       })
       .catch((e) => setError(friendlyError(e)))
       .finally(() => setLoading(false));
@@ -73,6 +82,9 @@ export default function PublisherScreen() {
     const today = `${y}-${m}-${d}`;
 
     const activeCards = cards.filter((c) => {
+      // 미완료 상태인 카드는 무조건 계속 노출
+      if (incompleteNotes.has(c.id)) return true;
+
       const pg = progressMap.get(c.id);
       if (!pg) return true; // 방문 기록이 전혀 없는 카드 (노출)
       
@@ -137,12 +149,19 @@ export default function PublisherScreen() {
           ? [1, 2, 3, 4].filter((r) => roundVisited(pg, r) > 0)
           : [];
         const pub = pg ? roundPublisher(pg, currentRound) : null;
+        const incNote = incompleteNotes.get(c.id);
+
         return (
           <button key={c.id} className="card-item" onClick={() => openCard(c)}>
             <span className="card-no">{displayNo(c)}</span>
             <span className="name">
               {c.name}
               {pub && <div className="unit-meta">배정: {pub}</div>}
+              {incNote && (
+                <div className="unit-meta" style={{ color: "#e65100", fontWeight: "bold" }}>
+                  🚨 미완료: {incNote.note}
+                </div>
+              )}
             </span>
             {doneRounds.length > 0 ? (
               <span className="done-badge">{doneRounds.join("·")}회 방문완료</span>
