@@ -524,7 +524,7 @@ export default function CardDetail({
         </div>
       </div>
       
-      {card.card_number === 501 && (
+      {numToCheck === 501 && (
         <div className="card-box" style={{ marginTop: 12, background: "#fff3e0", borderColor: "#ffe0b2" }}>
           {(() => {
             const inc = incompleteNotes.find(n => n.round_no === round);
