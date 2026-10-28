@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { normalizeCardUnits } from "./groups";
 import type {
   CardAssignment,
   CardProgress,
@@ -241,8 +242,87 @@ function byLegacy(a: { legacy_number: number | null; card_number: number },
 }
 
 const CARD_446_ID = "c186ceea-2da8-51a0-a903-4283f2eccb1d";
+const NORM_SYNC_KEY = "jw_units_norm_v2";
+let normSyncStarted = false;
+
+/** 전체 카드의 집 주소 정규화를 백그라운드에서 1회 DB에 반영 */
+async function syncAllNormalizedUnitsOnce(): Promise<void> {
+  if (normSyncStarted) return;
+  try {
+    if (typeof localStorage !== "undefined" && localStorage.getItem(NORM_SYNC_KEY) === "1") {
+      return;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  normSyncStarted = true;
+
+  try {
+    const all: TerritoryUnit[] = [];
+    let from = 0;
+    for (;;) {
+      const { data, error } = await supabase
+        .from("territory_units")
+        .select("id, card_id, seq_no, address_unit, caution_type_id, note, letter_zone")
+        .order("card_id")
+        .order("seq_no")
+        .range(from, from + 999);
+      if (error || !data) return;
+      const chunk = data as TerritoryUnit[];
+      all.push(...chunk);
+      if (chunk.length < 1000) break;
+      from += 1000;
+    }
+
+    const byCard = new Map<string, TerritoryUnit[]>();
+    for (const u of all) {
+      let arr = byCard.get(u.card_id);
+      if (!arr) {
+        arr = [];
+        byCard.set(u.card_id, arr);
+      }
+      arr.push(u);
+    }
+
+    const updates: { id: string; address_unit: string }[] = [];
+    for (const [, units] of byCard) {
+      units.sort((a, b) => a.seq_no - b.seq_no);
+      const norm = normalizeCardUnits(units);
+      for (let i = 0; i < units.length; i++) {
+        if (norm[i].address_unit !== units[i].address_unit) {
+          updates.push({ id: units[i].id, address_unit: norm[i].address_unit });
+        }
+      }
+    }
+
+    // Batch update in small concurrent chunks
+    const BATCH = 20;
+    for (let i = 0; i < updates.length; i += BATCH) {
+      const slice = updates.slice(i, i + BATCH);
+      await Promise.all(
+        slice.map((u) =>
+          supabase
+            .from("territory_units")
+            .update({ address_unit: u.address_unit })
+            .eq("id", u.id)
+        )
+      );
+    }
+
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem(NORM_SYNC_KEY, "1");
+      }
+    } catch {
+      // ignore
+    }
+  } catch {
+    // ignore background sync errors
+  }
+}
 
 export async function fetchCardSummaries(): Promise<CardSummary[]> {
+  void syncAllNormalizedUnitsOnce();
   const [{ data, error }, legacy] = await Promise.all([
     supabase.from("v_card_summary").select("*").range(0, 999),
     fetchLegacyMap(),
@@ -288,25 +368,17 @@ export async function fetchUnits(cardId: string): Promise<TerritoryUnit[]> {
     .eq("card_id", cardId)
     .order("seq_no");
   const units = must(data, error);
-  if (cardId === CARD_446_ID) {
-    return units.map((u) => {
-      if (/\r?\n/.test(u.address_unit)) {
-        const singleLine = u.address_unit
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .join(" ");
-        supabase
-          .from("territory_units")
-          .update({ address_unit: singleLine })
-          .eq("id", u.id)
-          .then(() => {});
-        return { ...u, address_unit: singleLine };
-      }
-      return u;
-    });
+  const normalized = normalizeCardUnits(units);
+  for (let i = 0; i < units.length; i++) {
+    if (normalized[i].address_unit !== units[i].address_unit) {
+      supabase
+        .from("territory_units")
+        .update({ address_unit: normalized[i].address_unit })
+        .eq("id", units[i].id)
+        .then(() => {});
+    }
   }
-  return units;
+  return normalized;
 }
 
 // ---- 편봉구역 -> 편지봉사 이동 ----
