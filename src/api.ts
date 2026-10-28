@@ -247,7 +247,7 @@ function byLegacy(a: { legacy_number: number | null; card_number: number },
   return la - lb || a.card_number - b.card_number;
 }
 
-const NORM_SYNC_KEY = "jw_units_norm_v4";
+const NORM_SYNC_KEY = "jw_units_norm_v5";
 let normSyncStarted = false;
 
 /** 전체 카드의 집 주소 정규화를 백그라운드에서 1회 DB에 반영 */

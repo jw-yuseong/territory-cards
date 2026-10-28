@@ -246,7 +246,11 @@ input, select {
 .choice-btn.family { color: var(--c-ok); border-color: var(--c-ok); }
 .caution-badge.letter-zone { background: #7c3aed; }        /* 편봉구역 = 보라 */
 .unit-row.letter-zone { background: #f3effd; border-color: #7c3aed; }
-.unit-row.letter-zone .unit-main { opacity: 0.7; }
+.unit-row.letter-zone .unit-main { opacity: 0.7; cursor: not-allowed; }
+.caution-badge.skip { background: #64748b; }               /* 상가구역/타구역 제외 = 회색 */
+.unit-row.check-disabled { background: #f1f5f9; border-color: #cbd5e1; }
+.unit-row.check-disabled .unit-main { opacity: 0.65; cursor: not-allowed; }
+.unit-check.disabled { background: #e2e8f0; border-color: #cbd5e1; color: #64748b; }
 .unit-caution-btn {
   background: #eef1f4;
   color: var(--c-muted);
