@@ -173,54 +173,13 @@ const EXPLICIT_UNIT_OVERRIDES: Record<string, string> = {
   "67b587b2-ce55-5507-a1ba-92917a65fb70:73": "왼쪽작은덩어리입니다 (월드컵대로51번길57-18)",
   "67b587b2-ce55-5507-a1ba-92917a65fb70:77": '92 작은덩어리구역 "끝" 이 길로 더 나오면 축복받는교회 나옴',
 
-  // 기타 단독 번지 연속 구간(337, 393번) 및 편봉구역 안내줄 평탄화(28, 427번)
+  // 기타 단독 번지 연속 구간(337, 393번)
   "32d6f4b1-0460-5505-a251-5d9756758034:81": '여기서부터는 "은구비로 146번길" 입니다. 46',
   "a9c67653-3250-5b01-86c2-5b6cf785ab5e:14": "(유성대로729번길 49-10) 새중앙교회",
   "a9c67653-3250-5b01-86c2-5b6cf785ab5e:56": "(유성대로719번길 41) (주)융창전력",
   "a9c67653-3250-5b01-86c2-5b6cf785ab5e:59": "안쪽길 (유성대로719번길 19)",
   "a9c67653-3250-5b01-86c2-5b6cf785ab5e:80": "(유성대로719번길 1) 템퍼",
-  "f6294b4d-4d03-5949-8c80-d7f445fa5e9e:67": '(노은로 39) "편봉구역"',
-  "a8448aa7-2055-55a4-b174-9608f0fb182c:30": '엘림빌 (송림로48번길5-10) "편지 봉사 구역"',
 };
-
-/**
- * 방문 체크 비활성화 사유를 반환한다 (방문 대상이 아닌 경우 문자열 사유, 방문 대상이면 null).
- * - "상가 구역입니다" / "상가구역 입니다" / "상가구역입니다" 포함 세대 및 해당 그룹 하위 상가 (299, 301, 302, 438번 등)
- * - "다른구역입니다" 안내 세대 (435번 스타돔상가 "(2층은 다른구역입니다)")
- * - "상가없음" 안내 세대 (516번 "광장빌라 (은구비서로 3번길 36) 상가없음")
- * - "편지 봉사 구역" / "편봉구역" 안내 세대 (단, "문이 열려 있으면 봉사해주세요" 빌라 및 135번 "상가만 해주세요" 하위 상가는 제외)
- */
-export function getCheckDisabledReason(
-  unit: TerritoryUnit,
-  group?: string | null
-): string | null {
-  const addr = unit.address_unit ?? "";
-  const grp = group ?? "";
-  const combined = `${grp} ${addr}`;
-
-  if (/상가\s*구역\s*입니다/.test(combined)) {
-    return "상가구역";
-  }
-  if (/다른\s*구역\s*입니다/.test(combined)) {
-    return "타구역";
-  }
-  if (/상가\s*없음/.test(combined)) {
-    return "상가없음";
-  }
-  if (/편지\s*봉사\s*구역|편봉\s*구역/.test(addr) && !/문이\s*열려/.test(addr)) {
-    // 135번 #16: '(노은동로99길87)\n"편지 봉사 구역"\n상가만 해주세요' 자체는 안내줄이므로 비활성화하되,
-    // 그 아래 #17~#19(1층 게이트맨, 미래이용원, 부동산)는 addr에 "편지 봉사 구역"이 없으므로 정상 체크 가능
-    return "편봉구역";
-  }
-  return null;
-}
-
-export function isCheckDisabledUnit(
-  unit: TerritoryUnit,
-  group?: string | null
-): boolean {
-  return getCheckDisabledReason(unit, group) !== null;
-}
 
 export interface NormalizeResult {
   units: TerritoryUnit[];
@@ -231,10 +190,14 @@ export interface NormalizeResult {
 /**
  * 299·301·302번 카드의 도로명주소 단독 행을 다음 상가 행과 결합(방안 B)
  */
-function applyPlanBMerge(_cardId: string, units: TerritoryUnit[]): {
+function applyPlanBMerge(cardId: string, units: TerritoryUnit[]): {
   merged: TerritoryUnit[];
   deletedIds: string[];
 } {
+  if (cardId !== CARD_299_ID && cardId !== CARD_301_ID && cardId !== CARD_302_ID) {
+    return { merged: units, deletedIds: [] };
+  }
+
   const deletedIds: string[] = [];
   const merged: TerritoryUnit[] = [];
 
@@ -244,204 +207,107 @@ function applyPlanBMerge(_cardId: string, units: TerritoryUnit[]): {
     const next = i + 1 < units.length ? units[i + 1] : null;
     const nextAddr = next ? next.address_unit.trim() : "";
 
-    // 299번
-    if (addr.includes("은구비서로3길34") && addr.includes("오땅비어")) {
-      merged.push({
-        ...u,
-        seq_no: merged.length + 1,
-        address_unit: '(은구비서로3길34) "상가구역 입니다"\n오땅비어',
-      });
-      continue;
-    }
-    if (
-      addr === "(은구비서로3번길 20)" &&
-      next &&
-      (nextAddr.includes("상가") || nextAddr.includes("남도주막"))
-    ) {
-      const shopLine =
-        nextAddr
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !/상가\s*구역/.test(s))
-          .join(" ") || "1층 남도주막";
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: `(은구비서로3번길 20) "상가 구역입니다."\n${shopLine}`,
-      });
-      i++;
-      continue;
-    }
-    if (
-      addr === "(은구비서로3길8-5)" &&
-      next &&
-      (nextAddr.includes("상가") || nextAddr.includes("샤넬"))
-    ) {
-      const shopLine =
-        nextAddr
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !/상가\s*구역/.test(s))
-          .join(" ") || "1층 샤넬";
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: `(은구비서로3길8-5) "상가 구역입니다"\n${shopLine}`,
-      });
-      i++;
-      continue;
-    }
-    if (
-      addr === "(은구비서로3길8-9)" &&
-      next &&
-      (nextAddr.includes("상가") || nextAddr.includes("기타교실"))
-    ) {
-      const shopLine =
-        nextAddr
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !/상가\s*구역/.test(s))
-          .join(" ") || "1층 기타교실";
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: `(은구비서로3길8-9) "상가 구역입니다"\n${shopLine}`,
-      });
-      i++;
-      continue;
-    }
-    if (
-      addr === "(은구비서로3길8-13)" &&
-      next &&
-      (nextAddr.includes("상가") || nextAddr.includes("타임"))
-    ) {
-      const shopLine =
-        nextAddr
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !/상가\s*구역/.test(s))
-          .join(" ") || "1층 타임";
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: `(은구비서로3길8-13) "상가 구역입니다"\n${shopLine}`,
-      });
-      i++;
-      continue;
-    }
-
-    // 301번
-    if (
-      addr === "(은구비서로23번길 52)" &&
-      next &&
-      (nextAddr.includes("상가") || nextAddr.includes("라드커피"))
-    ) {
-      const shopLine =
-        nextAddr
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !/상가\s*구역/.test(s))
-          .join(" ") || "1층 라드커피";
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: `(은구비서로23번길 52) "상가구역 입니다"\n${shopLine}`,
-      });
-      i++;
-      continue;
-    }
-    if (
-      addr === "(은구비서로23번길 8-24)" &&
-      next &&
-      (nextAddr.includes("상가") || nextAddr.includes("근육풀이"))
-    ) {
-      const shopLine =
-        nextAddr
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !/상가\s*구역/.test(s))
-          .join(" ") || "1층 근육풀이";
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: `(은구비서로23번길 8-24) "상가 구역입니다"\n${shopLine}`,
-      });
-      i++;
-      continue;
-    }
-    if (
-      addr === "(은구비서로 31)" &&
-      next &&
-      (nextAddr.includes("상가") || nextAddr.includes("여유사"))
-    ) {
-      const shopLine =
-        nextAddr
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !/상가\s*구역/.test(s))
-          .join(" ") || "여유사";
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: `(은구비서로 31) "상가 구역입니다"\n${shopLine}`,
-      });
-      i++;
-      continue;
-    }
-    if (addr.startsWith("(은구비서로 31-1)") && !addr.includes("3층") && next && nextAddr === "3층") {
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: '(은구비서로 31-1)\n"상가는 하지말아주세요"\n3층',
-      });
-      i++;
-      continue;
-    }
-
-    // 302번 (#35 + #36: 1층 춘천 닭갈비 / 1층 피아노 등 실제 상호 유지)
-    if (
-      addr === "(은구비서로23길8-7)" &&
-      next &&
-      (nextAddr.includes("상가") ||
-        nextAddr.includes("피아노") ||
-        nextAddr.includes("춘천") ||
-        nextAddr.includes("닭갈비"))
-    ) {
-      const shopLine =
-        nextAddr
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !/상가\s*구역/.test(s))
-          .join(" ") || "1층 춘천 닭갈비";
-      deletedIds.push(u.id);
-      merged.push({
-        ...next,
-        seq_no: merged.length + 1,
-        address_unit: `(은구비서로23길8-7) "상가 구역입니다"\n${shopLine}`,
-      });
-      i++;
-      continue;
-    }
-
-    // 이미 1줄로 병합된 "상가 구역입니다" 항목도 그룹 밑에 상호가 오도록 줄바꿈 정규화
-    const singleLineShopMatch = addr.match(
-      /^(\([^()]+\)\s*"상가\s*구역\s*입니다\.?")\s+(.+)$/
-    );
-    if (singleLineShopMatch) {
-      merged.push({
-        ...u,
-        seq_no: merged.length + 1,
-        address_unit: `${singleLineShopMatch[1]}\n${singleLineShopMatch[2]}`,
-      });
-      continue;
+    if (cardId === CARD_299_ID) {
+      if (addr.includes("은구비서로3길34") && addr.includes("오땅비어")) {
+        merged.push({
+          ...u,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3길34) "상가구역 입니다" 오땅비어',
+        });
+        continue;
+      }
+      if (addr === "(은구비서로3번길 20)" && next && nextAddr.includes("남도주막")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3번길 20) "상가 구역입니다." 1층 남도주막',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로3길8-5)" && next && nextAddr.includes("샤넬")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3길8-5) "상가 구역입니다"\n1층 샤넬',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로3길8-9)" && next && nextAddr.includes("기타교실")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3길8-9) "상가 구역입니다"\n1층 기타교실',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로3길8-13)" && next && nextAddr.includes("타임")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3길8-13) "상가 구역입니다" 1층 타임',
+        });
+        i++;
+        continue;
+      }
+    } else if (cardId === CARD_301_ID) {
+      if (addr === "(은구비서로23번길 52)" && next && nextAddr.includes("라드커피")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로23번길 52) "상가구역 입니다" 1층 라드커피',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로23번길 8-24)" && next && nextAddr.includes("근육풀이")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로23번길 8-24) "상가 구역입니다"\n1층 근육풀이',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로 31)" && next && nextAddr.includes("여유사")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로 31) "상가 구역입니다"\n여유사',
+        });
+        i++;
+        continue;
+      }
+      if (addr.startsWith("(은구비서로 31-1)") && !addr.includes("3층") && next && nextAddr === "3층") {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로 31-1)\n"상가는 하지말아주세요"\n3층',
+        });
+        i++;
+        continue;
+      }
+    } else if (cardId === CARD_302_ID) {
+      if (addr === "(은구비서로23길8-7)" && next && nextAddr.includes("피아노")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로23길8-7) "상가 구역입니다" 1층 피아노',
+        });
+        i++;
+        continue;
+      }
     }
 
     merged.push(u.seq_no !== merged.length + 1 ? { ...u, seq_no: merged.length + 1 } : u);

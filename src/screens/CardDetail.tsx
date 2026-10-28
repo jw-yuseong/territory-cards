@@ -14,7 +14,7 @@ import {
   deleteIncompleteNote,
 } from "../api";
 import { getCautionTypes, getConductors, getPublishers } from "../lists";
-import { buildGroups, getCheckDisabledReason } from "../groups";
+import { buildGroups } from "../groups";
 import type {
   CardAssignment,
   CardSummary,
@@ -344,14 +344,11 @@ export default function CardDetail({
     ? publishers.find((p) => p.id === assignment.publisher_id)?.name
     : null;
 
-  async function toggleUnit(unit: TerritoryUnit, group?: string | null) {
+  async function toggleUnit(unit: TerritoryUnit) {
     setError("");
-    const skipReason = getCheckDisabledReason(unit, group);
-    if (unit.letter_zone === "active" || skipReason) {
+    if (unit.letter_zone === "active") {
       hapticWarn();
-      setError(
-        `${unit.address_unit}은(는) ${skipReason ?? "편봉구역"}이므로 여기서는 체크할 수 없습니다.`
-      );
+      setError(`${unit.address_unit}은(는) 편봉구역입니다. 봉사 대신 편지봉사로 진행되며 여기서는 체크할 수 없습니다.`);
       return;
     }
     const existing = visitByUnit.get(unit.id);
@@ -576,11 +573,7 @@ export default function CardDetail({
 
       {blocks.map((b) => {
         const isCollapsed = collapsed.has(b.key);
-        const activeItems = b.items.filter(
-          (it) => it.unit.letter_zone !== "active" && !getCheckDisabledReason(it.unit, it.group)
-        );
-        const checkedInGroup = activeItems.filter((it) => visitByUnit.has(it.unit.id)).length;
-        const allDisabledInGroup = b.items.length > 0 && activeItems.length === 0;
+        const checkedInGroup = b.items.filter((it) => visitByUnit.has(it.unit.id)).length;
         return (
           <div key={b.key}>
             {b.group && (
@@ -589,18 +582,11 @@ export default function CardDetail({
                 <span>{b.group}</span>
                 <span
                   className={`gh-count ${
-                    !allDisabledInGroup &&
-                    checkedInGroup >= activeItems.length &&
-                    activeItems.length > 0
-                      ? "done"
-                      : ""
+                    checkedInGroup >= b.items.length && b.items.length > 0 ? "done" : ""
                   }`}
                 >
-                  {allDisabledInGroup
-                    ? "체크 제외"
-                    : `${checkedInGroup}/${activeItems.length}${
-                        checkedInGroup >= activeItems.length && activeItems.length > 0 ? " ✓" : ""
-                      }`}
+                  {checkedInGroup}/{b.items.length}
+                  {checkedInGroup >= b.items.length && b.items.length > 0 ? " ✓" : ""}
                 </span>
               </button>
             )}
@@ -610,41 +596,25 @@ export default function CardDetail({
                 const caution = u.caution_type_id ? cautionById.get(u.caution_type_id) : null;
                 const zoneActive = u.letter_zone === "active";
                 const zoneReq = u.letter_zone === "requested";
-                const skipReason = getCheckDisabledReason(u, group);
-                const checkDisabled = zoneActive || skipReason !== null;
                 return (
                   <div
                     key={u.id}
                     className={`unit-row ${visit ? "visited" : ""} ${
-                      zoneActive || skipReason === "편봉구역"
+                      zoneActive
                         ? "letter-zone"
-                        : skipReason
-                          ? "check-disabled"
-                          : caution?.label === "형제자매댁"
-                            ? "family"
-                            : caution?.is_do_not_call
-                              ? "dnc"
-                              : ""
+                        : caution?.label === "형제자매댁"
+                          ? "family"
+                          : caution?.is_do_not_call
+                            ? "dnc"
+                            : ""
                     }`}
                   >
                     <button
                       className="unit-main"
-                      disabled={busyUnit === u.id || checkDisabled}
-                      onClick={() => toggleUnit(u, group)}
+                      disabled={busyUnit === u.id || zoneActive}
+                      onClick={() => toggleUnit(u)}
                     >
-                      <span
-                        className={`unit-check ${
-                          skipReason && skipReason !== "편봉구역" && !visit ? "disabled" : ""
-                        }`}
-                      >
-                        {visit
-                          ? "✓"
-                          : zoneActive || skipReason === "편봉구역"
-                            ? "📮"
-                            : skipReason
-                              ? "—"
-                              : ""}
-                      </span>
+                      <span className="unit-check">{visit ? "✓" : zoneActive ? "📮" : ""}</span>
                       <span>
                         <span className="unit-addr">
                           {group && <span className="unit-group-prefix">{group}</span>}
@@ -659,14 +629,9 @@ export default function CardDetail({
                         {u.note && <div className="unit-meta">📝 {u.note}</div>}
                       </span>
                     </button>
-                    {(zoneActive || skipReason === "편봉구역") && (
-                      <span className="caution-badge letter-zone">편봉구역</span>
-                    )}
-                    {!zoneActive && skipReason && skipReason !== "편봉구역" && (
-                      <span className="caution-badge skip">{skipReason}</span>
-                    )}
+                    {zoneActive && <span className="caution-badge letter-zone">편봉구역</span>}
                     {zoneReq && <span className="caution-badge soft">편봉구역 요청됨</span>}
-                    {caution && !zoneActive && !skipReason && (
+                    {caution && !zoneActive && (
                       <span
                         className={`caution-badge ${
                           caution.label === "형제자매댁"
