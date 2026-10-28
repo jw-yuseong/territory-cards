@@ -242,7 +242,7 @@ function byLegacy(a: { legacy_number: number | null; card_number: number },
 }
 
 const CARD_446_ID = "c186ceea-2da8-51a0-a903-4283f2eccb1d";
-const NORM_SYNC_KEY = "jw_units_norm_v2";
+const NORM_SYNC_KEY = "jw_units_norm_v3";
 let normSyncStarted = false;
 
 /** 전체 카드의 집 주소 정규화를 백그라운드에서 1회 DB에 반영 */
