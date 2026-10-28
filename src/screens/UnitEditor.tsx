@@ -7,6 +7,7 @@ import {
   fetchUnits,
   fetchVisits,
   removeLetterZone,
+  setCardName,
   setCardStartPoint,
   setUnitNote,
 } from "../api";
@@ -36,12 +37,15 @@ export default function UnitEditor({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [cardName, setCardNameState] = useState(card.name);
+  const [nameModal, setNameModal] = useState(false);
   const [startUrl, setStartUrl] = useState<string | null>(null);
   const [startModal, setStartModal] = useState(false);
 
   useEffect(() => {
+    setCardNameState(card.name);
     fetchCardStartPoint(card.id).then(setStartUrl).catch(() => setStartUrl(null));
-  }, [card.id]);
+  }, [card.id, card.name]);
 
   async function reload() {
     const [u, v] = await Promise.all([fetchUnits(card.id), fetchVisits(card.id)]);
@@ -147,7 +151,7 @@ export default function UnitEditor({
       </button>
 
       <h2 className="section-title">
-        {displayNo(card)}번 {card.name} — 집 편집
+        {displayNo(card)}번 {cardName} — 집 편집
       </h2>
       <div className="notice">
         집을 누르면 수정·삭제·추가 버튼이 나타납니다. 번호는 자동으로 다시
@@ -156,6 +160,14 @@ export default function UnitEditor({
       {error && <div className="error-msg">{error}</div>}
 
       <div className="card-box" style={{ padding: 10 }}>
+        <button
+          className="btn-line"
+          style={{ width: "100%", marginBottom: 8 }}
+          disabled={busy}
+          onClick={() => setNameModal(true)}
+        >
+          ✏️ 카드 이름(제목) 수정
+        </button>
         <div className="unit-meta" style={{ marginBottom: 6 }}>
           📍 구역 시작점 링크: {startUrl ? "있음" : "없음"}
           {startUrl && (
@@ -332,6 +344,30 @@ export default function UnitEditor({
         />
       )}
 
+      {nameModal && (
+        <CardNameModal
+          cardNo={displayNo(card)}
+          initial={cardName}
+          busy={busy}
+          onCancel={() => setNameModal(false)}
+          onSave={async (newName) => {
+            setNameModal(false);
+            setBusy(true);
+            setError("");
+            try {
+              await setCardName(card.id, newName);
+              const trimmed = newName.trim();
+              setCardNameState(trimmed);
+              card.name = trimmed;
+              invalidateCardsCache();
+            } catch (e) {
+              setError(friendlyError(e));
+            }
+            setBusy(false);
+          }}
+        />
+      )}
+
       {startModal && (
         <StartLinkModal
           initial={startUrl ?? ""}
@@ -351,6 +387,49 @@ export default function UnitEditor({
           }}
         />
       )}
+    </div>
+  );
+}
+
+function CardNameModal({
+  cardNo,
+  initial,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  cardNo: string | number;
+  initial: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (name: string) => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <div className="modal-back" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>{cardNo}번 카드 이름(제목) 수정</h3>
+        <div className="field">
+          <label>구역카드 이름</label>
+          <input
+            type="text"
+            value={value}
+            autoFocus
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="예: 노은로367번길 108(송림5맞은편)"
+          />
+        </div>
+        <button
+          className="btn-primary"
+          disabled={busy || value.trim() === ""}
+          onClick={() => onSave(value.trim())}
+        >
+          저장
+        </button>
+        <button className="choice-btn" style={{ marginTop: 8 }} onClick={onCancel}>
+          취소
+        </button>
+      </div>
     </div>
   );
 }

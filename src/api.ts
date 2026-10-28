@@ -397,6 +397,17 @@ export async function setCardStartPoint(cardId: string, url: string | null): Pro
   if (error) throw new Error(error.message);
 }
 
+/** 구역카드 이름(제목) 수정 (관리자 전용) */
+export async function setCardName(cardId: string, name: string): Promise<void> {
+  const value = name.trim();
+  if (!value) throw new Error("카드 이름을 입력해 주세요.");
+  const { error } = await supabase
+    .from("territory_cards")
+    .update({ name: value })
+    .eq("id", cardId);
+  if (error) throw new Error(error.message);
+}
+
 /** 봉사자 메모 저장/삭제 (빈 문자열이면 삭제) */
 export async function setUnitNote(unitId: string, note: string | null): Promise<void> {
   const { error } = await supabase
