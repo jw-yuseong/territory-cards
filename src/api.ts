@@ -240,6 +240,8 @@ function byLegacy(a: { legacy_number: number | null; card_number: number },
   return la - lb || a.card_number - b.card_number;
 }
 
+const CARD_446_ID = "c186ceea-2da8-51a0-a903-4283f2eccb1d";
+
 export async function fetchCardSummaries(): Promise<CardSummary[]> {
   const [{ data, error }, legacy] = await Promise.all([
     supabase.from("v_card_summary").select("*").range(0, 999),
@@ -247,7 +249,18 @@ export async function fetchCardSummaries(): Promise<CardSummary[]> {
   ]);
   const rows = must(data, error) as CardSummary[];
   return rows
-    .map((r) => ({ ...r, legacy_number: legacy.get(r.id) ?? null }))
+    .map((r) => {
+      let name = r.name;
+      if (r.id === CARD_446_ID && name === "노은로367번길 108(반석5맞은편)") {
+        name = "노은로367번길 108(송림5맞은편)";
+        supabase
+          .from("territory_cards")
+          .update({ name })
+          .eq("id", CARD_446_ID)
+          .then(() => {});
+      }
+      return { ...r, name, legacy_number: legacy.get(r.id) ?? null };
+    })
     .sort(byLegacy);
 }
 
@@ -258,7 +271,13 @@ export async function fetchCardProgress(): Promise<CardProgress[]> {
   ]);
   const rows = must(data, error) as CardProgress[];
   return rows
-    .map((r) => ({ ...r, legacy_number: legacy.get(r.card_id) ?? null }))
+    .map((r) => {
+      let name = r.name;
+      if (r.card_id === CARD_446_ID && name === "노은로367번길 108(반석5맞은편)") {
+        name = "노은로367번길 108(송림5맞은편)";
+      }
+      return { ...r, name, legacy_number: legacy.get(r.card_id) ?? null };
+    })
     .sort(byLegacy);
 }
 
@@ -268,7 +287,26 @@ export async function fetchUnits(cardId: string): Promise<TerritoryUnit[]> {
     .select("id, card_id, seq_no, address_unit, caution_type_id, note, letter_zone")
     .eq("card_id", cardId)
     .order("seq_no");
-  return must(data, error);
+  const units = must(data, error);
+  if (cardId === CARD_446_ID) {
+    return units.map((u) => {
+      if (/\r?\n/.test(u.address_unit)) {
+        const singleLine = u.address_unit
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .join(" ");
+        supabase
+          .from("territory_units")
+          .update({ address_unit: singleLine })
+          .eq("id", u.id)
+          .then(() => {});
+        return { ...u, address_unit: singleLine };
+      }
+      return u;
+    });
+  }
+  return units;
 }
 
 // ---- 편봉구역 -> 편지봉사 이동 ----
