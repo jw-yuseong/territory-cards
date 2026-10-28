@@ -66,13 +66,15 @@ function isFloorOrRoomLine(s: string): boolean {
   );
 }
 
-// 사용자 컨펌 대기 중인 ④번 항목 카드 ID 목록 (516번)
-const AMBIGUOUS_CARD_IDS = new Set([
-  "2468d37e-cacb-5e37-9f2d-70af94eb2614", // 516번
-]);
+export const CARD_299_ID = "00088550-6a47-59d8-980f-5c85fe77ba85";
+export const CARD_301_ID = "2b31db33-2c11-59dd-a0a7-7f6ccf7e14b8";
+export const CARD_302_ID = "04850a17-1510-57bc-ba08-4df4cdaf8b11";
+export const CARD_446_ID = "c186ceea-2da8-51a0-a903-4283f2eccb1d";
+export const CARD_514_ID = "8716b2e2-f947-5d02-9dd2-f157835b337c";
+export const CARD_516_ID = "2468d37e-cacb-5e37-9f2d-70af94eb2614";
 
-const CARD_514_ID = "8716b2e2-f947-5d02-9dd2-f157835b337c";
-const CARD_446_ID = "c186ceea-2da8-51a0-a903-4283f2eccb1d";
+// 전체 줄바꿈을 1줄 공백으로 평탄화하는 카드 (446번, 516번 방안 A)
+const FLATTEN_ALL_CARD_IDS = new Set([CARD_446_ID, CARD_516_ID]);
 
 // 사용자 컨펌 완료된 개별 세대 정규화 매핑 (`${card_id}:${seq_no}` -> 수정된 주소)
 const EXPLICIT_UNIT_OVERRIDES: Record<string, string> = {
@@ -108,6 +110,9 @@ const EXPLICIT_UNIT_OVERRIDES: Record<string, string> = {
   "4356263e-9b49-54b1-957f-474080327188:4": "B구역 끝 대전꽃백화점",
   "4356263e-9b49-54b1-957f-474080327188:5": "C구역 시작 (북유성대로 42) 밷엘농원",
   "4356263e-9b49-54b1-957f-474080327188:7": "C구역 끝 취미분재원",
+
+  // ④ 514번 #12 오타 `2)` 제거
+  "8716b2e2-f947-5d02-9dd2-f157835b337c:12": "(은구비남로 33번길68)\n4층 작심스터디",
 
   // ⑤ 엑셀 수식(=HYPERLINK) 및 날짜 자동변환 오류 수정 (365, 371, 449번)
   "58567a27-0f60-5410-97d1-9f315edc9281:1": "A구역 (은구비로138번길 75)",
@@ -176,31 +181,180 @@ const EXPLICIT_UNIT_OVERRIDES: Record<string, string> = {
   "a9c67653-3250-5b01-86c2-5b6cf785ab5e:80": "(유성대로719번길 1) 템퍼",
 };
 
-/**
- * 카드의 집 주소 목록에서 엑셀 줄바꿈으로 인해 잘못 묶인 주소들을 정규화한다.
- * - 괄호 유지 및 원본 숫자 보존
- * - 보류 카드(AMBIGUOUS_CARD_IDS)나 "상가 구역입니다" 항목은 건드리지 않음
- */
-export function normalizeCardUnits(units: TerritoryUnit[]): TerritoryUnit[] {
-  if (units.length === 0) return units;
-  const cardId = units[0].card_id;
-  if (AMBIGUOUS_CARD_IDS.has(cardId)) return units;
+export interface NormalizeResult {
+  units: TerritoryUnit[];
+  updatedUnits: { id: string; address_unit: string }[];
+  deletedUnitIds: string[];
+}
 
-  // 446번 카드는 모든 줄바꿈을 공백으로 1줄 평탄화 (사용자 컨펌 완료)
-  if (cardId === CARD_446_ID) {
-    return units.map((u) => {
+/**
+ * 299·301·302번 카드의 도로명주소 단독 행을 다음 상가 행과 결합(방안 B)
+ */
+function applyPlanBMerge(cardId: string, units: TerritoryUnit[]): {
+  merged: TerritoryUnit[];
+  deletedIds: string[];
+} {
+  if (cardId !== CARD_299_ID && cardId !== CARD_301_ID && cardId !== CARD_302_ID) {
+    return { merged: units, deletedIds: [] };
+  }
+
+  const deletedIds: string[] = [];
+  const merged: TerritoryUnit[] = [];
+
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    const addr = u.address_unit.trim();
+    const next = i + 1 < units.length ? units[i + 1] : null;
+    const nextAddr = next ? next.address_unit.trim() : "";
+
+    if (cardId === CARD_299_ID) {
+      if (addr.includes("은구비서로3길34") && addr.includes("오땅비어")) {
+        merged.push({
+          ...u,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3길34) "상가구역 입니다" 오땅비어',
+        });
+        continue;
+      }
+      if (addr === "(은구비서로3번길 20)" && next && nextAddr.includes("남도주막")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3번길 20) "상가 구역입니다." 1층 남도주막',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로3길8-5)" && next && nextAddr.includes("샤넬")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3길8-5) "상가 구역입니다"\n1층 샤넬',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로3길8-9)" && next && nextAddr.includes("기타교실")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3길8-9) "상가 구역입니다"\n1층 기타교실',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로3길8-13)" && next && nextAddr.includes("타임")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로3길8-13) "상가 구역입니다" 1층 타임',
+        });
+        i++;
+        continue;
+      }
+    } else if (cardId === CARD_301_ID) {
+      if (addr === "(은구비서로23번길 52)" && next && nextAddr.includes("라드커피")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로23번길 52) "상가구역 입니다" 1층 라드커피',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로23번길 8-24)" && next && nextAddr.includes("근육풀이")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로23번길 8-24) "상가 구역입니다"\n1층 근육풀이',
+        });
+        i++;
+        continue;
+      }
+      if (addr === "(은구비서로 31)" && next && nextAddr.includes("여유사")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로 31) "상가 구역입니다"\n여유사',
+        });
+        i++;
+        continue;
+      }
+      if (addr.startsWith("(은구비서로 31-1)") && !addr.includes("3층") && next && nextAddr === "3층") {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로 31-1)\n"상가는 하지말아주세요"\n3층',
+        });
+        i++;
+        continue;
+      }
+    } else if (cardId === CARD_302_ID) {
+      if (addr === "(은구비서로23길8-7)" && next && nextAddr.includes("피아노")) {
+        deletedIds.push(u.id);
+        merged.push({
+          ...next,
+          seq_no: merged.length + 1,
+          address_unit: '(은구비서로23길8-7) "상가 구역입니다" 1층 피아노',
+        });
+        i++;
+        continue;
+      }
+    }
+
+    merged.push(u.seq_no !== merged.length + 1 ? { ...u, seq_no: merged.length + 1 } : u);
+  }
+
+  return { merged, deletedIds };
+}
+
+/**
+ * 카드의 집 주소 목록에서 엑셀 줄바꿈으로 인해 잘못 묶인 주소들을 정규화한다 (상세 변경내역 포함).
+ */
+export function normalizeCardUnitsDetailed(units: TerritoryUnit[]): NormalizeResult {
+  if (units.length === 0) {
+    return { units, updatedUnits: [], deletedUnitIds: [] };
+  }
+  const cardId = units[0].card_id;
+  const origAddrById = new Map<string, string>();
+  for (const u of units) {
+    origAddrById.set(u.id, u.address_unit);
+  }
+
+  // 446번, 516번(방안 A) 카드는 모든 줄바꿈을 공백으로 1줄 평탄화
+  if (FLATTEN_ALL_CARD_IDS.has(cardId)) {
+    const normalized = units.map((u) => {
       if (!/\r?\n/.test(u.address_unit)) return u;
       const singleLine = u.address_unit
         .split(/\r?\n/)
         .map((s) => s.trim())
         .filter(Boolean)
-        .join(" ");
+        .join(" ")
+        .replace(/\s+/g, " ");
       return singleLine !== u.address_unit ? { ...u, address_unit: singleLine } : u;
     });
+    const updatedUnits: { id: string; address_unit: string }[] = [];
+    for (const u of normalized) {
+      if (u.address_unit !== origAddrById.get(u.id)) {
+        updatedUnits.push({ id: u.id, address_unit: u.address_unit });
+      }
+    }
+    return { units: normalized, updatedUnits, deletedUnitIds: [] };
   }
 
+  // 299, 301, 302번 방안 B 병합 먼저 적용
+  const { merged: afterPlanB, deletedIds } = applyPlanBMerge(cardId, units);
+
   // Pass 0: 사용자 컨펌 완료된 개별 세대 매핑 우선 적용
-  const pass0 = units.map((u) => {
+  const pass0 = afterPlanB.map((u) => {
     const key = `${u.card_id}:${u.seq_no}`;
     const override = EXPLICIT_UNIT_OVERRIDES[key];
     if (override !== undefined && override !== u.address_unit) {
@@ -228,15 +382,13 @@ export function normalizeCardUnits(units: TerritoryUnit[]): TerritoryUnit[] {
     let triggered = false;
 
     // Rule A: 괄호 안의 줄바꿈 제거 (예: "(왕가봉로2번길 \n 57)" -> "(왕가봉로2번길 57)")
-    if (!(cardId === CARD_514_ID && u.seq_no === 12)) {
-      const nextCur = cur.replace(
-        /\(([^()]*?)\r?\n\s*([^()]*?)\)/g,
-        (_, g1: string, g2: string) => `(${g1.trim()} ${g2.trim()})`
-      );
-      if (nextCur !== cur) {
-        cur = nextCur;
-        triggered = true;
-      }
+    const nextCur = cur.replace(
+      /\(([^()]*?)\r?\n\s*([^()]*?)\)/g,
+      (_, g1: string, g2: string) => `(${g1.trim()} ${g2.trim()})`
+    );
+    if (nextCur !== cur) {
+      cur = nextCur;
+      triggered = true;
     }
 
     let lines = cur
@@ -270,7 +422,7 @@ export function normalizeCardUnits(units: TerritoryUnit[]): TerritoryUnit[] {
   });
 
   // Pass 2: 하위 호수(비도로명 1줄 집)가 하나도 없는 나홀로 다중줄 집을 1줄로 평탄화(Rule D)
-  return pass1.map((u, idx) => {
+  const finalUnits = pass1.map((u, idx) => {
     const key = `${u.card_id}:${u.seq_no}`;
     if (EXPLICIT_UNIT_OVERRIDES[key] !== undefined) return u;
 
@@ -307,6 +459,19 @@ export function normalizeCardUnits(units: TerritoryUnit[]): TerritoryUnit[] {
     }
     return u;
   });
+
+  const updatedUnits: { id: string; address_unit: string }[] = [];
+  for (const u of finalUnits) {
+    if (u.address_unit !== origAddrById.get(u.id)) {
+      updatedUnits.push({ id: u.id, address_unit: u.address_unit });
+    }
+  }
+
+  return { units: finalUnits, updatedUnits, deletedUnitIds: deletedIds };
+}
+
+export function normalizeCardUnits(units: TerritoryUnit[]): TerritoryUnit[] {
+  return normalizeCardUnitsDetailed(units).units;
 }
 
 /** 주소 한 칸을 (그룹 제목 줄들, 호수)로 분해 */

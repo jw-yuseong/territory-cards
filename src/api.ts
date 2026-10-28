@@ -1,5 +1,11 @@
 import { supabase } from "./supabase";
-import { normalizeCardUnits } from "./groups";
+import {
+  normalizeCardUnitsDetailed,
+  CARD_299_ID,
+  CARD_301_ID,
+  CARD_302_ID,
+  CARD_446_ID,
+} from "./groups";
 import type {
   CardAssignment,
   CardProgress,
@@ -241,8 +247,7 @@ function byLegacy(a: { legacy_number: number | null; card_number: number },
   return la - lb || a.card_number - b.card_number;
 }
 
-const CARD_446_ID = "c186ceea-2da8-51a0-a903-4283f2eccb1d";
-const NORM_SYNC_KEY = "jw_units_norm_v3";
+const NORM_SYNC_KEY = "jw_units_norm_v4";
 let normSyncStarted = false;
 
 /** 전체 카드의 집 주소 정규화를 백그라운드에서 1회 DB에 반영 */
@@ -285,14 +290,12 @@ async function syncAllNormalizedUnitsOnce(): Promise<void> {
     }
 
     const updates: { id: string; address_unit: string }[] = [];
+    const deleteIds: string[] = [];
     for (const [, units] of byCard) {
       units.sort((a, b) => a.seq_no - b.seq_no);
-      const norm = normalizeCardUnits(units);
-      for (let i = 0; i < units.length; i++) {
-        if (norm[i].address_unit !== units[i].address_unit) {
-          updates.push({ id: units[i].id, address_unit: norm[i].address_unit });
-        }
-      }
+      const { updatedUnits, deletedUnitIds } = normalizeCardUnitsDetailed(units);
+      updates.push(...updatedUnits);
+      deleteIds.push(...deletedUnitIds);
     }
 
     // Batch update in small concurrent chunks
@@ -309,16 +312,34 @@ async function syncAllNormalizedUnitsOnce(): Promise<void> {
       );
     }
 
-    try {
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(NORM_SYNC_KEY, "1");
+    // Delete merged redundant header rows sequentially (admin session required for RPC)
+    let allDeletesSucceeded = true;
+    for (const delId of deleteIds) {
+      const { error: delErr } = await supabase.rpc("admin_delete_unit", { p_unit_id: delId });
+      if (delErr) {
+        allDeletesSucceeded = false;
       }
-    } catch {
-      // ignore
+    }
+
+    if (allDeletesSucceeded) {
+      try {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(NORM_SYNC_KEY, "1");
+        }
+      } catch {
+        // ignore
+      }
     }
   } catch {
     // ignore background sync errors
   }
+}
+
+function adjustMergedTotalUnits(cardId: string, totalUnits: number): number {
+  if (cardId === CARD_299_ID && totalUnits === 79) return 75;
+  if (cardId === CARD_301_ID && totalUnits === 44) return 40;
+  if (cardId === CARD_302_ID && totalUnits === 60) return 59;
+  return totalUnits;
 }
 
 export async function fetchCardSummaries(): Promise<CardSummary[]> {
@@ -339,7 +360,12 @@ export async function fetchCardSummaries(): Promise<CardSummary[]> {
           .eq("id", CARD_446_ID)
           .then(() => {});
       }
-      return { ...r, name, legacy_number: legacy.get(r.id) ?? null };
+      return {
+        ...r,
+        name,
+        total_units: adjustMergedTotalUnits(r.id, r.total_units),
+        legacy_number: legacy.get(r.id) ?? null,
+      };
     })
     .sort(byLegacy);
 }
@@ -356,7 +382,12 @@ export async function fetchCardProgress(): Promise<CardProgress[]> {
       if (r.card_id === CARD_446_ID && name === "노은로367번길 108(반석5맞은편)") {
         name = "노은로367번길 108(송림5맞은편)";
       }
-      return { ...r, name, legacy_number: legacy.get(r.card_id) ?? null };
+      return {
+        ...r,
+        name,
+        total_units: adjustMergedTotalUnits(r.card_id, r.total_units),
+        legacy_number: legacy.get(r.card_id) ?? null,
+      };
     })
     .sort(byLegacy);
 }
@@ -368,15 +399,20 @@ export async function fetchUnits(cardId: string): Promise<TerritoryUnit[]> {
     .eq("card_id", cardId)
     .order("seq_no");
   const units = must(data, error);
-  const normalized = normalizeCardUnits(units);
-  for (let i = 0; i < units.length; i++) {
-    if (normalized[i].address_unit !== units[i].address_unit) {
-      supabase
-        .from("territory_units")
-        .update({ address_unit: normalized[i].address_unit })
-        .eq("id", units[i].id)
-        .then(() => {});
-    }
+  const { units: normalized, updatedUnits, deletedUnitIds } = normalizeCardUnitsDetailed(units);
+  for (const u of updatedUnits) {
+    supabase
+      .from("territory_units")
+      .update({ address_unit: u.address_unit })
+      .eq("id", u.id)
+      .then(() => {});
+  }
+  if (deletedUnitIds.length > 0) {
+    void (async () => {
+      for (const delId of deletedUnitIds) {
+        await supabase.rpc("admin_delete_unit", { p_unit_id: delId });
+      }
+    })();
   }
   return normalized;
 }
