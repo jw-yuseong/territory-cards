@@ -20,6 +20,7 @@ export default function PublisherScreen() {
   const [incompleteNotes, setIncompleteNotes] = useState<Map<string, CardIncompleteNote>>(new Map());
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [selected, setSelected] = useState<CardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -64,13 +65,27 @@ export default function PublisherScreen() {
       .finally(() => setLoading(false));
   }, []);
 
-  const { round1Cards, round2Cards, commercialCards, searchCards } = useMemo(() => {
+  const {
+    round1Cards,
+    round2Cards,
+    commercialCards,
+    completedRegular,
+    completedComm,
+    searchCards,
+  } = useMemo(() => {
     const q = query.trim();
     if (q) {
       const searched = cards.filter(
         (c) => (c.legacy_number !== null && String(c.legacy_number).includes(q)) || c.name.includes(q)
       );
-      return { round1Cards: [], round2Cards: [], commercialCards: [], searchCards: searched };
+      return {
+        round1Cards: [],
+        round2Cards: [],
+        commercialCards: [],
+        completedRegular: [],
+        completedComm: [],
+        searchCards: searched,
+      };
     }
 
     const now = new Date();
@@ -110,32 +125,60 @@ export default function PublisherScreen() {
         const pubB = pgB ? roundPublisher(pgB, targetRound) : null;
         if (pubA && !pubB) return -1;
         if (!pubA && pubB) return 1;
-        return 0; // 나머지는 기본(byLegacy 번호순) 유지
+        return 0; // 번호순 유지
       });
     }
 
-    const comm: CardSummary[] = [];
-    const r1Raw: CardSummary[] = [];
-    const r2Raw: CardSummary[] = [];
+    const activeR1: CardSummary[] = [];
+    const activeR2: CardSummary[] = [];
+    const activeComm: CardSummary[] = [];
+    const doneReg: CardSummary[] = [];
+    const doneComm: CardSummary[] = [];
 
     for (const c of cards) {
-      if (isCommercialCard(c)) {
-        comm.push(c);
+      const isComm = isCommercialCard(c);
+      const pg = progressMap.get(c.id);
+
+      if (isComm) {
+        const isDone = pg ? isCardRoundDone(pg, 1, incompleteNotes.get(`${c.id}-1`)) : false;
+        if (isDone) {
+          doneComm.push(c);
+        } else {
+          // 아직 방문 안 한 상가 카드 (또는 오늘 방문 중/미완료)
+          if (isCardActive(c, 1)) activeComm.push(c);
+        }
         continue;
       }
-      const pg = progressMap.get(c.id);
+
+      // 일반 구역카드
       const activeRound = pg ? getCardActiveRound(pg, incompleteNotes) : 1;
+      const isR1Done = pg ? isCardRoundDone(pg, 1, incompleteNotes.get(`${c.id}-1`)) : false;
+
       if (activeRound === 1) {
-        if (isCardActive(c, 1)) r1Raw.push(c);
+        if (isCardActive(c, 1)) {
+          activeR1.push(c);
+        } else if (isR1Done) {
+          doneReg.push(c);
+        }
       } else {
-        if (isCardActive(c, activeRound)) r2Raw.push(c);
+        // 2차 구역: 인도자가 2차로 배정했거나, 1차가 완전히 끝났을 때만 2차 목록에 표시
+        const hasR2Assignment = pg && roundPublisher(pg, 2) !== null;
+        if (hasR2Assignment || activeR1.length === 0) {
+          if (isCardActive(c, 2)) activeR2.push(c);
+          else doneReg.push(c);
+        } else {
+          // 1차가 아직 남아있는데 1차만 끝난 카드는 '완료 카드'로 분류 (기본 목록에서 숨김)
+          doneReg.push(c);
+        }
       }
     }
 
     return {
-      round1Cards: sortActiveCards(r1Raw, 1),
-      round2Cards: sortActiveCards(r2Raw, 2),
-      commercialCards: comm,
+      round1Cards: sortActiveCards(activeR1, 1),
+      round2Cards: sortActiveCards(activeR2, 2),
+      commercialCards: activeComm,
+      completedRegular: doneReg,
+      completedComm: doneComm,
       searchCards: null,
     };
   }, [cards, query, progressMap, incompleteNotes]);
@@ -165,16 +208,18 @@ export default function PublisherScreen() {
             </div>
           )}
         </span>
-        {isCommercial ? (
+        {isDone ? (
+          <span className="done-badge">
+            {isCommercial ? "상가 · 1회 완료" : "1회 방문완료"}
+          </span>
+        ) : isCommercial ? (
           <span className="caution-badge soft" style={{ background: "#475569" }}>
             상가 · {c.total_units}집
           </span>
         ) : targetRound >= 2 ? (
           <span className="round-badge-2">
-            {targetRound}차 {visited > 0 && !isDone ? `(${visited}집)` : "대기"}
+            {targetRound}차 {visited > 0 ? `(${visited}집)` : "대기"}
           </span>
-        ) : isDone ? (
-          <span className="done-badge">1회 방문완료</span>
         ) : (
           <span className="units">{c.total_units}집</span>
         )}
@@ -182,7 +227,8 @@ export default function PublisherScreen() {
     );
   }
 
-  const totalRegularCount = round1Cards.length + round2Cards.length;
+  const totalActiveCount = round1Cards.length + round2Cards.length;
+  const totalCompletedCount = completedRegular.length + completedComm.length;
 
   return (
     <div>
@@ -204,11 +250,11 @@ export default function PublisherScreen() {
         {searchCards !== null
           ? `검색 결과 ${searchCards.length}개`
           : round1Cards.length > 0
-            ? `1차 방문 카드 ${round1Cards.length}개 ${round2Cards.length > 0 ? `· 2차 대기 ${round2Cards.length}개` : ""}`
+            ? `1차 방문할 카드 ${round1Cards.length}개 ${round2Cards.length > 0 ? `· 2차 ${round2Cards.length}개` : ""}`
             : `2차 방문 구역 (${round2Cards.length}개 카드)`}
       </div>
 
-      {/* 1) 검색 중일 때 */}
+      {/* 1) 검색 중일 때: 모든 매칭 카드(완료 여부 뱃지 포함) 표시 */}
       {searchCards !== null && (
         <div>
           {searchCards.map((c) => {
@@ -220,16 +266,15 @@ export default function PublisherScreen() {
         </div>
       )}
 
-      {/* 2) 평상시: 1차 진행 구역 -> (조건부 구분선) -> 2차 순환 구역 -> 상가 구역 */}
+      {/* 2) 평상시: 미방문 활성 카드만 표시 (완료 카드는 숨김) */}
       {searchCards === null && (
         <div>
           {/* 1차 진행 카드 */}
           {(showAll ? round1Cards : round1Cards.slice(0, 50)).map((c) => renderCardItem(c, 1, false))}
 
-          {/* 2차 순환 카드: 455번 아래에 1번부터 시작 */}
+          {/* 2차 순환 카드 */}
           {round2Cards.length > 0 && (
             <div>
-              {/* 455번까지 1차가 완료되어 2차만 남은 경우에는 구분선 자동 생략! */}
               {round1Cards.length > 0 && (
                 <div className="round-divider">
                   🔄 2차 방문 구역 (1차 완료된 카드 · 1번부터)
@@ -239,7 +284,7 @@ export default function PublisherScreen() {
             </div>
           )}
 
-          {!showAll && totalRegularCount > 50 && (
+          {!showAll && totalActiveCount > 50 && (
             <button
               className="btn-line"
               style={{ width: "100%", margin: "10px 0" }}
@@ -249,18 +294,40 @@ export default function PublisherScreen() {
             </button>
           )}
 
-          {/* 3) 501~519번 상가 구역카드 (별도 하단 섹션) */}
+          {/* 3) 501~519번 상가 구역카드 (방문이 완료된 카드는 숨기고 미방문 카드만 표시) */}
           {commercialCards.length > 0 && (
             <div style={{ marginTop: 16 }}>
               <div className="commercial-divider">
                 <span>🏬 상가 구역 (501번~519번)</span>
-                <span className="count-badge">{commercialCards.length}개</span>
+                <span className="count-badge">{commercialCards.length}개 남음</span>
               </div>
-              {commercialCards.map((c) => {
-                const pg = progressMap.get(c.id);
-                const ar = pg ? getCardActiveRound(pg, incompleteNotes) : 1;
-                return renderCardItem(c, ar, true);
-              })}
+              {commercialCards.map((c) => renderCardItem(c, 1, true))}
+            </div>
+          )}
+
+          {/* 4) 완료된 카드는 기본 숨김 처리되며, 원할 때만 펼쳐볼 수 있도록 토글 제공 */}
+          {totalCompletedCount > 0 && (
+            <div style={{ marginTop: 24, borderTop: "1px dashed var(--c-border)", paddingTop: 12 }}>
+              <button
+                className="btn-line"
+                style={{
+                  width: "100%",
+                  color: "var(--c-muted)",
+                  borderColor: "var(--c-border)",
+                  fontSize: "var(--fs-small)",
+                }}
+                onClick={() => setShowCompleted(!showCompleted)}
+              >
+                {showCompleted
+                  ? "▲ 방문 완료된 카드 숨기기"
+                  : `▼ 방문 완료된 카드 보기 (총 ${totalCompletedCount}개 완료)`}
+              </button>
+              {showCompleted && (
+                <div style={{ marginTop: 10 }}>
+                  {completedRegular.map((c) => renderCardItem(c, 1, false))}
+                  {completedComm.map((c) => renderCardItem(c, 1, true))}
+                </div>
+              )}
             </div>
           )}
         </div>

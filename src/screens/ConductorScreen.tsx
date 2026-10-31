@@ -73,6 +73,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
   }, []);
 
   // 카드 그룹 분류: 상가 카드 / 1차 일반 카드 / 2차 일반 카드
+  // "방문이 완료된 카드는 추천/미방문 목록에서 숨김" 정책 적용
   const {
     r1Cards,
     r2Cards,
@@ -81,7 +82,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
     r1Remaining,
     r2Recommended,
     r2Remaining,
-    commRecommended,
+    commRemaining,
   } = useMemo(() => {
     const comm: CardProgress[] = [];
     const r1: CardProgress[] = [];
@@ -105,6 +106,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
       const filtered = list.filter((p) => {
         const isInc = incompleteNotes.has(`${p.card_id}-${round}`);
         if (isInc) return true;
+        // 완료된 카드는 추천에서 제외 (방문 안 하고 배정도 안 된 카드만 추천)
         return roundVisited(p, round) === 0 && !roundPublisher(p, round);
       });
 
@@ -117,15 +119,20 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
       });
     }
 
+    // 미방문 카드 목록에서도 방문완료 카드는 숨김
+    const unvisitedR1 = r1.filter((p) => roundVisited(p, 1) === 0);
+    const unvisitedR2 = r2.filter((p) => roundVisited(p, 2) === 0);
+    const unvisitedComm = comm.filter((p) => roundVisited(p, 1) === 0 || incompleteNotes.has(`${p.card_id}-1`));
+
     return {
       r1Cards: r1,
       r2Cards: r2,
       commercialCards: comm,
       r1Recommended: sortRec(r1, 1),
-      r1Remaining: r1.filter((p) => roundVisited(p, 1) === 0),
+      r1Remaining: unvisitedR1,
       r2Recommended: sortRec(r2, 2),
-      r2Remaining: r2.filter((p) => roundVisited(p, 2) === 0),
-      commRecommended: sortRec(comm, 1),
+      r2Remaining: unvisitedR2,
+      commRemaining: unvisitedComm,
     };
   }, [progress, incompleteNotes]);
 
@@ -141,6 +148,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
   function simpleCardRow(p: CardProgress, targetRound: number, isCommercial = false) {
     const pub = roundPublisher(p, targetRound);
     const incNote = incompleteNotes.get(`${p.card_id}-${targetRound}`);
+    const isDone = isCardRoundDone(p, targetRound, incNote);
 
     return (
       <button
@@ -158,7 +166,11 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
             </div>
           )}
         </span>
-        {isCommercial ? (
+        {isDone ? (
+          <span className="done-badge">
+            {isCommercial ? "상가 · 1회 완료" : "1회 방문완료"}
+          </span>
+        ) : isCommercial ? (
           <span className="caution-badge soft" style={{ background: "#475569" }}>
             상가 · {p.total_units}집
           </span>
@@ -217,19 +229,19 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
       {view === "recommend" && (
         <div>
           <div className="notice">
-            {r1Cards.length > 0 && r2Cards.length > 0
+            {r1Remaining.length > 0 && r2Remaining.length > 0
               ? "지금은 1회차 마무리 및 2회차 순환 진행 중입니다. 카드를 누르면 배정할 수 있습니다."
-              : r1Cards.length === 0
+              : r1Remaining.length === 0
                 ? "지금은 2회차 진행 중입니다. 1번 카드부터 순서대로 배정해 주세요."
                 : "지금은 1회차 진행 중입니다. 번호가 낮은 카드부터 순서대로 배정해 주세요."}
           </div>
 
           {/* 1) 1차 진행 구역 (아직 1차 미완료 카드) */}
-          {r1Cards.length > 0 && (
+          {r1Remaining.length > 0 && (
             <div>
               <div className="section-title">1회차 추천 카드 (번호 낮은 순)</div>
               {r1Recommended.length === 0 && (
-                <div className="muted">1회차에 배정할 수 있는 새 카드가 없습니다.</div>
+                <div className="muted">1회차에 새로 배정할 수 있는 카드가 없습니다.</div>
               )}
               {r1Recommended.slice(0, 10).map((p) => simpleCardRow(p, 1))}
 
@@ -241,10 +253,10 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
           )}
 
           {/* 2) 2차 순환 구역: 455번 아래에 1번부터 시작 */}
-          {r2Cards.length > 0 && (
-            <div style={{ marginTop: r1Cards.length > 0 ? 20 : 0 }}>
+          {r2Remaining.length > 0 && (
+            <div style={{ marginTop: r1Remaining.length > 0 ? 20 : 0 }}>
               {/* 455번까지 1차가 완료되어 2차만 남은 경우에는 구분선 자동 생략! */}
-              {r1Cards.length > 0 && (
+              {r1Remaining.length > 0 && (
                 <div className="round-divider">
                   🔄 2차 배정 구역 (1차 완료된 카드 · 1번부터)
                 </div>
@@ -252,7 +264,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
 
               <div className="section-title">2회차 추천 카드 (1번부터 순환)</div>
               {r2Recommended.length === 0 && (
-                <div className="muted">2회차에 배정할 수 있는 카드가 없습니다.</div>
+                <div className="muted">2회차에 새로 배정할 수 있는 카드가 없습니다.</div>
               )}
               {r2Recommended.slice(0, 10).map((p) => simpleCardRow(p, 2))}
 
@@ -263,19 +275,20 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
             </div>
           )}
 
-          {/* 3) 501~519번 상가 구역카드 (별도 하단 섹션) */}
-          {commercialCards.length > 0 && (
-            <div style={{ marginTop: 24 }}>
-              <div className="commercial-divider">
-                <span>🏬 상가 구역 (501번~519번)</span>
-                <span className="count-badge">{commercialCards.length}개</span>
-              </div>
-              {commercialCards.map((p) => {
-                const ar = getCardActiveRound(p, incompleteNotes);
-                return simpleCardRow(p, ar, true);
-              })}
+          {/* 3) 501~519번 상가 구역카드 (방문완료된 카드는 숨기고 미방문 카드만 표시) */}
+          <div style={{ marginTop: 24 }}>
+            <div className="commercial-divider">
+              <span>🏬 상가 구역 (501번~519번)</span>
+              <span className="count-badge">{commRemaining.length}개 남음</span>
             </div>
-          )}
+            {commRemaining.length === 0 ? (
+              <div className="muted" style={{ padding: "8px 0" }}>
+                상가 구역의 모든 카드가 배정/방문 완료되었습니다. (전체 현황 탭에서 확인 가능)
+              </div>
+            ) : (
+              commRemaining.map((p) => simpleCardRow(p, 1, true))
+            )}
+          </div>
 
           {!showAllRemain && (r1Remaining.length > 50 || r2Remaining.length > 50) && (
             <button
@@ -290,7 +303,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
       )}
 
       {view === "all" && (() => {
-        const r = tableRound ?? (r1Cards.length === 0 ? 2 : 1);
+        const r = tableRound ?? (r1Remaining.length === 0 ? 2 : 1);
         const rows = filtered;
         const regularRows = rows.filter((p) => !isCommercialCard(p));
         const commRows = rows.filter((p) => isCommercialCard(p));
@@ -309,6 +322,8 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
           const visited = roundVisited(p, r);
           const pct = p.total_units > 0 ? (100 * visited) / p.total_units : 0;
           const incNote = incompleteNotes.get(`${p.card_id}-${r}`);
+          const isDone = isCardRoundDone(p, r, incNote);
+
           return (
             <tr key={p.card_id} onClick={() => setTarget({ card: p, round: r })}>
               <td style={{ fontWeight: 700, color: "var(--c-primary)" }}>
@@ -317,11 +332,18 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
               <td className="tname">
                 {p.name}
                 {incNote && <div style={{ fontSize: 11, color: "#e65100" }}>🚨미완료</div>}
+                {isDone && !incNote && (
+                  <span style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginLeft: 4 }}>
+                    ✓1회완료
+                  </span>
+                )}
               </td>
               <td>{p.total_units}</td>
               <td>{fmtDate(roundFirstDate(p, r))}</td>
               <td>{roundPublisher(p, r) ?? ""}</td>
-              <td className={rateClass(pct)}>{pct.toFixed(1)}</td>
+              <td className={isDone ? "rate-high" : rateClass(pct)}>
+                {isDone ? "완료" : `${pct.toFixed(1)}%`}
+              </td>
             </tr>
           );
         }
@@ -369,7 +391,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
                 {/* 1) 일반 구역카드 */}
                 {(showAllTable ? regularRows : regularRows.slice(0, 50)).map(renderTableRow)}
 
-                {/* 2) 상가 구역 분리 헤더 및 행 */}
+                {/* 2) 상가 구역 분리 헤더 및 행 (방문완료 여부 명확히 표시) */}
                 {commRows.length > 0 && (
                   <>
                     <tr>
