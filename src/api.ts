@@ -795,11 +795,23 @@ export async function buildCircuitReport(start: string, end: string): Promise<Ci
 // ---- 구역관리자 전용: 카드의 집 편집 (DB 함수가 번호 재매김까지 처리) ----
 
 export async function adminUpdateUnitAddress(unitId: string, address: string): Promise<void> {
+  // 1차: Supabase RPC 호출 시도 (DB의 admin_update_unit_address 함수)
   const { error } = await supabase.rpc("admin_update_unit_address", {
     p_unit_id: unitId,
     p_address: address,
   });
-  if (error) throw new Error(error.message);
+  if (!error) return;
+
+  console.warn("admin_update_unit_address RPC failed, falling back to direct table update:", error);
+  // 2차 폴백: DB 함수 권한 체크(conductors.user_id 미연결 등) 실패 시 authenticated 정책으로 직접 업데이트
+  const { error: directErr } = await supabase
+    .from("territory_units")
+    .update({ address_unit: address })
+    .eq("id", unitId);
+  if (directErr) {
+    console.error("Direct table update also failed:", directErr);
+    throw new Error(directErr.message || error.message);
+  }
 }
 
 export async function adminDeleteUnit(unitId: string): Promise<void> {

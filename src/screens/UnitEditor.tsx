@@ -160,16 +160,21 @@ export default function UnitEditor({
     });
   }
 
-  async function run(op: () => Promise<void>) {
+  async function run(op: () => Promise<void>): Promise<boolean> {
     setBusy(true);
     setError("");
     try {
       await op();
       await reload();
+      return true;
     } catch (e) {
-      setError(friendlyError(e));
+      const msg = friendlyError(e);
+      setError(msg);
+      alert(msg);
+      return false;
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   async function doDelete(unit: TerritoryUnit) {
@@ -905,24 +910,33 @@ export default function UnitEditor({
           onCancel={() => setModal(null)}
           onSave={async (addr) => {
             const m = modal;
-            setModal(null);
-            setSelected(null);
+            let prefix = STANDALONE_MARKER;
             if (m.mode === "edit") {
-              // 기존 마커 유지 또는 다중줄 직접 입력 시 그룹 시작 마커 부여.
-              // 마커가 없던 1줄 주소도 관리자가 직접 수정한 경우 STANDALONE_MARKER를 부여하여
-              // groups.ts의 자동 정규화나 오버라이드가 관리자의 수정을 덮어쓰지 못하도록 보장.
-              let prefix = STANDALONE_MARKER;
+              const currentItem = flatItems.find((it) => it.item.unit.id === m.unit.id);
+              const isGroupChild =
+                currentItem && currentItem.block.group !== null && !currentItem.item.definesGroup;
+
               if (/\r?\n/.test(addr)) {
                 prefix = GROUP_START_MARKER;
+              } else if (isGroupChild) {
+                prefix = GROUP_MEMBER_MARKER;
               } else if (m.unit.address_unit.startsWith(GROUP_MEMBER_MARKER)) {
                 prefix = GROUP_MEMBER_MARKER;
-              } else if (m.unit.address_unit.startsWith(STANDALONE_MARKER)) {
+              } else {
                 prefix = STANDALONE_MARKER;
               }
-              await run(() => adminUpdateUnitAddress(m.unit.id, `${prefix}${addr}`));
+              const ok = await run(() => adminUpdateUnitAddress(m.unit.id, `${prefix}${addr}`));
+              if (ok) {
+                setModal(null);
+                setSelected(null);
+              }
             } else {
               const prefix = /\r?\n/.test(addr) ? GROUP_START_MARKER : "";
-              await run(() => adminInsertUnit(card.id, m.afterSeq, `${prefix}${addr}`));
+              const ok = await run(() => adminInsertUnit(card.id, m.afterSeq, `${prefix}${addr}`));
+              if (ok) {
+                setModal(null);
+                setSelected(null);
+              }
             }
           }}
         />
@@ -985,9 +999,12 @@ export default function UnitEditor({
               card.name = trimmed;
               invalidateCardsCache();
             } catch (e) {
-              setError(friendlyError(e));
+              const msg = friendlyError(e);
+              setError(msg);
+              alert(msg);
+            } finally {
+              setBusy(false);
             }
-            setBusy(false);
           }}
         />
       )}
@@ -1005,9 +1022,12 @@ export default function UnitEditor({
               await setCardStartPoint(card.id, url);
               setStartUrl(url.trim() === "" ? null : url.trim());
             } catch (e) {
-              setError(friendlyError(e));
+              const msg = friendlyError(e);
+              setError(msg);
+              alert(msg);
+            } finally {
+              setBusy(false);
             }
-            setBusy(false);
           }}
         />
       )}
@@ -1345,7 +1365,7 @@ function GroupTitleModal({
           disabled={busy || value.trim() === ""}
           onClick={() => onSave(value.trim())}
         >
-          저장
+          {busy ? "저장 중..." : "저장"}
         </button>
         <button className="choice-btn" style={{ marginTop: 8 }} onClick={onCancel}>
           취소
@@ -1536,7 +1556,7 @@ function AddressModal({
           disabled={busy || value.trim() === ""}
           onClick={() => onSave(value.trim())}
         >
-          저장
+          {busy ? "저장 중..." : "저장"}
         </button>
         <button className="choice-btn" style={{ marginTop: 8 }} onClick={onCancel}>
           취소
