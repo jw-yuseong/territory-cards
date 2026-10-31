@@ -878,3 +878,151 @@ export async function deleteIncompleteNote(
     .match({ card_id, round_no });
   if (error) throw new Error(error.message);
 }
+
+// ---- 편지봉사 구역 관리자 편집 (건물/세대 등록, 수정, 삭제) ----
+
+export async function adminAddLetterUnit(
+  building: string,
+  ho: string,
+  postal?: string | null,
+  note?: string | null
+): Promise<void> {
+  const { error } = await supabase.rpc("admin_add_letter_unit", {
+    p_building: building,
+    p_ho: ho,
+    p_postal: postal || null,
+    p_note: note || null,
+  });
+  if (!error) return;
+
+  console.warn("admin_add_letter_unit RPC failed, trying direct insert fallback:", error);
+  const { data: maxRow } = await supabase
+    .from("letter_units")
+    .select("seq_no")
+    .order("seq_no", { ascending: false })
+    .limit(1);
+  const nextSeq = (maxRow && maxRow[0] ? maxRow[0].seq_no : 0) + 1;
+
+  const { error: insErr } = await supabase.from("letter_units").insert({
+    building: building.trim(),
+    ho: ho.trim(),
+    postal: postal?.trim() || null,
+    note: note?.trim() || null,
+    seq_no: nextSeq,
+  });
+  if (insErr) throw new Error(insErr.message || error.message);
+}
+
+export async function adminBulkAddLetterUnits(
+  building: string,
+  hoList: string[],
+  postal?: string | null,
+  note?: string | null
+): Promise<number> {
+  const { data, error } = await supabase.rpc("admin_bulk_add_letter_units", {
+    p_building: building,
+    p_ho_list: hoList,
+    p_postal: postal || null,
+    p_note: note || null,
+  });
+  if (!error) return (data as number) ?? hoList.length;
+
+  console.warn("admin_bulk_add_letter_units RPC failed, trying direct bulk insert fallback:", error);
+  const { data: maxRow } = await supabase
+    .from("letter_units")
+    .select("seq_no")
+    .order("seq_no", { ascending: false })
+    .limit(1);
+  let nextSeq = maxRow && maxRow[0] ? maxRow[0].seq_no : 0;
+
+  const rows = hoList
+    .map((h) => h.trim())
+    .filter(Boolean)
+    .map((h) => {
+      nextSeq++;
+      return {
+        building: building.trim(),
+        ho: h,
+        postal: postal?.trim() || null,
+        note: note?.trim() || null,
+        seq_no: nextSeq,
+      };
+    });
+
+  if (rows.length === 0) return 0;
+  const { error: insErr } = await supabase.from("letter_units").insert(rows);
+  if (insErr) throw new Error(insErr.message || error.message);
+  return rows.length;
+}
+
+export async function adminUpdateLetterUnit(
+  unitId: string,
+  ho: string,
+  postal?: string | null,
+  note?: string | null
+): Promise<void> {
+  const { error } = await supabase.rpc("admin_update_letter_unit", {
+    p_unit_id: unitId,
+    p_ho: ho,
+    p_postal: postal || null,
+    p_note: note || null,
+  });
+  if (!error) return;
+
+  console.warn("admin_update_letter_unit RPC failed, trying direct update fallback:", error);
+  const { error: upErr } = await supabase
+    .from("letter_units")
+    .update({
+      ho: ho.trim(),
+      postal: postal?.trim() || null,
+      note: note?.trim() || null,
+    })
+    .eq("id", unitId);
+  if (upErr) throw new Error(upErr.message || error.message);
+}
+
+export async function adminDeleteLetterUnit(unitId: string): Promise<void> {
+  const { error } = await supabase.rpc("admin_delete_letter_unit", {
+    p_unit_id: unitId,
+  });
+  if (!error) return;
+
+  console.warn("admin_delete_letter_unit RPC failed, trying direct delete fallback:", error);
+  const { error: delErr } = await supabase
+    .from("letter_units")
+    .delete()
+    .eq("id", unitId);
+  if (delErr) throw new Error(delErr.message || error.message);
+}
+
+export async function adminRenameLetterBuilding(
+  oldBuilding: string,
+  newBuilding: string
+): Promise<void> {
+  const { error } = await supabase.rpc("admin_rename_letter_building", {
+    p_old_building: oldBuilding,
+    p_new_building: newBuilding,
+  });
+  if (!error) return;
+
+  console.warn("admin_rename_letter_building RPC failed, trying direct update fallback:", error);
+  const { error: upErr } = await supabase
+    .from("letter_units")
+    .update({ building: newBuilding.trim() })
+    .eq("building", oldBuilding);
+  if (upErr) throw new Error(upErr.message || error.message);
+}
+
+export async function adminDeleteLetterBuilding(building: string): Promise<void> {
+  const { error } = await supabase.rpc("admin_delete_letter_building", {
+    p_building: building,
+  });
+  if (!error) return;
+
+  console.warn("admin_delete_letter_building RPC failed, trying direct delete fallback:", error);
+  const { error: delErr } = await supabase
+    .from("letter_units")
+    .delete()
+    .eq("building", building);
+  if (delErr) throw new Error(delErr.message || error.message);
+}
