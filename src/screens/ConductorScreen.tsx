@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { assignCard, fetchCardProgress, unassignCard, fetchIncompleteNotes } from "../api";
 import { getConductors, getPublishers } from "../lists";
 import type { CardProgress, Conductor, Publisher, CardIncompleteNote } from "../types";
-import { displayNo, roundFirstDate, roundPublisher, roundVisited } from "../types";
+import {
+  displayNo,
+  isCommercialCard,
+  isCardRoundDone,
+  getCardActiveRound,
+  roundFirstDate,
+  roundPublisher,
+  roundVisited,
+} from "../types";
 import { friendlyError } from "../errors";
 import { matchName } from "../chosung";
 import LetterMinistry from "./LetterMinistry";
@@ -33,9 +41,9 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
   const [view, setView] = useState<"recommend" | "all" | "letter">("recommend");
   const [query, setQuery] = useState("");
   const [target, setTarget] = useState<AssignTarget | null>(null);
-  const [tableRound, setTableRound] = useState<number | null>(null); // 전체 현황 표의 회차
-  const [showAllRemain, setShowAllRemain] = useState(false); // 추천뷰 미방문 목록 전체보기
-  const [showAllTable, setShowAllTable] = useState(false); // 전체 현황 표 전체보기
+  const [tableRound, setTableRound] = useState<number | null>(null);
+  const [showAllRemain, setShowAllRemain] = useState(false);
+  const [showAllTable, setShowAllTable] = useState(false);
 
   async function load() {
     try {
@@ -51,6 +59,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
       const incMap = new Map<string, CardIncompleteNote>();
       for (const note of inc) {
         incMap.set(`${note.card_id}-${note.round_no}`, note);
+        incMap.set(note.card_id, note);
       }
       setIncompleteNotes(incMap);
     } catch (e) {
@@ -63,44 +72,62 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
     load();
   }, []);
 
-  // 카드는 한 집이라도 방문 기록이 있으면 그 회차를 '방문완료'로 본다.
-  // 현재 회차 = 기록이 하나도 없는 카드가 아직 남아있는 가장 낮은 회차
-  const currentRound = useMemo(() => {
-    for (let r = 1; r <= 4; r++) {
-      const untouched = progress.some(
-        (p) => p.total_units > 0 && roundVisited(p, r) === 0
-      );
-      if (untouched) return r;
+  // 카드 그룹 분류: 상가 카드 / 1차 일반 카드 / 2차 일반 카드
+  const {
+    r1Cards,
+    r2Cards,
+    commercialCards,
+    r1Recommended,
+    r1Remaining,
+    r2Recommended,
+    r2Remaining,
+    commRecommended,
+  } = useMemo(() => {
+    const comm: CardProgress[] = [];
+    const r1: CardProgress[] = [];
+    const r2: CardProgress[] = [];
+
+    for (const p of progress) {
+      if (p.total_units === 0) continue;
+      if (isCommercialCard(p)) {
+        comm.push(p);
+        continue;
+      }
+      const ar = getCardActiveRound(p, incompleteNotes);
+      if (ar === 1) {
+        r1.push(p);
+      } else {
+        r2.push(p);
+      }
     }
-    return 4;
-  }, [progress]);
 
-  // 추천: 미완료 카드 우선, 그다음 방문 안 하고 배정도 안 된 가장 번호 낮은 카드들
-  const recommended = useMemo(() => {
-    const list = progress.filter((p) => {
-      if (p.total_units === 0) return false;
-      const isInc = incompleteNotes.has(`${p.card_id}-${currentRound}`);
-      if (isInc) return true;
-      return roundVisited(p, currentRound) === 0 && !roundPublisher(p, currentRound);
-    });
+    function sortRec(list: CardProgress[], round: number) {
+      const filtered = list.filter((p) => {
+        const isInc = incompleteNotes.has(`${p.card_id}-${round}`);
+        if (isInc) return true;
+        return roundVisited(p, round) === 0 && !roundPublisher(p, round);
+      });
 
-    return list.sort((a, b) => {
-      const incA = incompleteNotes.has(`${a.card_id}-${currentRound}`);
-      const incB = incompleteNotes.has(`${b.card_id}-${currentRound}`);
-      if (incA && !incB) return -1;
-      if (!incA && incB) return 1;
-      return 0;
-    });
-  }, [progress, currentRound, incompleteNotes]);
+      return filtered.sort((a, b) => {
+        const incA = incompleteNotes.has(`${a.card_id}-${round}`);
+        const incB = incompleteNotes.has(`${b.card_id}-${round}`);
+        if (incA && !incB) return -1;
+        if (!incA && incB) return 1;
+        return 0; // 번호순 유지
+      });
+    }
 
-  // 현재 회차에서 아직 방문 기록이 없는 모든 카드 (순서대로)
-  const remaining = useMemo(
-    () =>
-      progress.filter(
-        (p) => p.total_units > 0 && roundVisited(p, currentRound) === 0
-      ),
-    [progress, currentRound]
-  );
+    return {
+      r1Cards: r1,
+      r2Cards: r2,
+      commercialCards: comm,
+      r1Recommended: sortRec(r1, 1),
+      r1Remaining: r1.filter((p) => roundVisited(p, 1) === 0),
+      r2Recommended: sortRec(r2, 2),
+      r2Remaining: r2.filter((p) => roundVisited(p, 2) === 0),
+      commRecommended: sortRec(comm, 1),
+    };
+  }, [progress, incompleteNotes]);
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -110,16 +137,16 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
     );
   }, [progress, query]);
 
-  // 추천 카드 화면용 간단한 한 줄 카드 (누르면 현재 회차 배정창)
-  function simpleCardRow(p: CardProgress) {
-    const pub = roundPublisher(p, currentRound);
-    const incNote = incompleteNotes.get(`${p.card_id}-${currentRound}`);
+  // 추천 카드 화면용 간단한 한 줄 카드 (누르면 해당 회차 배정창 열림)
+  function simpleCardRow(p: CardProgress, targetRound: number, isCommercial = false) {
+    const pub = roundPublisher(p, targetRound);
+    const incNote = incompleteNotes.get(`${p.card_id}-${targetRound}`);
 
     return (
       <button
-        key={p.card_id}
+        key={`${p.card_id}-${targetRound}`}
         className="card-item"
-        onClick={() => setTarget({ card: p, round: currentRound })}
+        onClick={() => setTarget({ card: p, round: targetRound })}
       >
         <span className="card-no">{displayNo(p)}</span>
         <span className="name">
@@ -131,7 +158,15 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
             </div>
           )}
         </span>
-        <span className="units">{p.total_units}집</span>
+        {isCommercial ? (
+          <span className="caution-badge soft" style={{ background: "#475569" }}>
+            상가 · {p.total_units}집
+          </span>
+        ) : targetRound >= 2 ? (
+          <span className="round-badge-2">{targetRound}차 배정</span>
+        ) : (
+          <span className="units">{p.total_units}집</span>
+        )}
       </button>
     );
   }
@@ -182,35 +217,84 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
       {view === "recommend" && (
         <div>
           <div className="notice">
-            지금은 <b>{currentRound}회차</b> 진행 중입니다. 번호가 낮은 카드부터
-            순서대로 배정해 주세요. 카드를 누르면 배정할 수 있습니다.
+            {r1Cards.length > 0 && r2Cards.length > 0
+              ? "지금은 1회차 마무리 및 2회차 순환 진행 중입니다. 카드를 누르면 배정할 수 있습니다."
+              : r1Cards.length === 0
+                ? "지금은 2회차 진행 중입니다. 1번 카드부터 순서대로 배정해 주세요."
+                : "지금은 1회차 진행 중입니다. 번호가 낮은 카드부터 순서대로 배정해 주세요."}
           </div>
 
-          <div className="section-title">추천 카드 (번호 낮은 순)</div>
-          {recommended.length === 0 && (
-            <div className="muted">배정할 수 있는 새 카드가 없습니다.</div>
+          {/* 1) 1차 진행 구역 (아직 1차 미완료 카드) */}
+          {r1Cards.length > 0 && (
+            <div>
+              <div className="section-title">1회차 추천 카드 (번호 낮은 순)</div>
+              {r1Recommended.length === 0 && (
+                <div className="muted">1회차에 배정할 수 있는 새 카드가 없습니다.</div>
+              )}
+              {r1Recommended.slice(0, 10).map((p) => simpleCardRow(p, 1))}
+
+              <div className="section-title">
+                1회차에 아직 방문 안 한 카드 ({r1Remaining.length}개)
+              </div>
+              {(showAllRemain ? r1Remaining : r1Remaining.slice(0, 50)).map((p) => simpleCardRow(p, 1))}
+            </div>
           )}
-          {recommended.slice(0, 10).map((p) => simpleCardRow(p))}
 
-          <div className="section-title">
-            {currentRound}회차에 아직 방문 안 한 카드 ({remaining.length}개)
-          </div>
-          {(showAllRemain ? remaining : remaining.slice(0, 50)).map((p) => simpleCardRow(p))}
-          {!showAllRemain && remaining.length > 50 && (
+          {/* 2) 2차 순환 구역: 455번 아래에 1번부터 시작 */}
+          {r2Cards.length > 0 && (
+            <div style={{ marginTop: r1Cards.length > 0 ? 20 : 0 }}>
+              {/* 455번까지 1차가 완료되어 2차만 남은 경우에는 구분선 자동 생략! */}
+              {r1Cards.length > 0 && (
+                <div className="round-divider">
+                  🔄 2차 배정 구역 (1차 완료된 카드 · 1번부터)
+                </div>
+              )}
+
+              <div className="section-title">2회차 추천 카드 (1번부터 순환)</div>
+              {r2Recommended.length === 0 && (
+                <div className="muted">2회차에 배정할 수 있는 카드가 없습니다.</div>
+              )}
+              {r2Recommended.slice(0, 10).map((p) => simpleCardRow(p, 2))}
+
+              <div className="section-title">
+                2회차에 아직 방문 안 한 카드 ({r2Remaining.length}개)
+              </div>
+              {(showAllRemain ? r2Remaining : r2Remaining.slice(0, 50)).map((p) => simpleCardRow(p, 2))}
+            </div>
+          )}
+
+          {/* 3) 501~519번 상가 구역카드 (별도 하단 섹션) */}
+          {commercialCards.length > 0 && (
+            <div style={{ marginTop: 24 }}>
+              <div className="commercial-divider">
+                <span>🏬 상가 구역 (501번~519번)</span>
+                <span className="count-badge">{commercialCards.length}개</span>
+              </div>
+              {commercialCards.map((p) => {
+                const ar = getCardActiveRound(p, incompleteNotes);
+                return simpleCardRow(p, ar, true);
+              })}
+            </div>
+          )}
+
+          {!showAllRemain && (r1Remaining.length > 50 || r2Remaining.length > 50) && (
             <button
               className="btn-line"
-              style={{ width: "100%", marginTop: 8 }}
+              style={{ width: "100%", marginTop: 14 }}
               onClick={() => setShowAllRemain(true)}
             >
-              전체보기 (나머지 {remaining.length - 50}개)
+              미방문 카드 전체보기
             </button>
           )}
         </div>
       )}
 
       {view === "all" && (() => {
-        const r = tableRound ?? currentRound;
+        const r = tableRound ?? (r1Cards.length === 0 ? 2 : 1);
         const rows = filtered;
+        const regularRows = rows.filter((p) => !isCommercialCard(p));
+        const commRows = rows.filter((p) => isCommercialCard(p));
+
         const withUnits = rows.filter((p) => p.total_units > 0);
         const avg =
           withUnits.length > 0
@@ -220,6 +304,28 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
               ) / withUnits.length
             : 0;
         const doneCount = withUnits.filter((p) => roundVisited(p, r) > 0).length;
+
+        function renderTableRow(p: CardProgress) {
+          const visited = roundVisited(p, r);
+          const pct = p.total_units > 0 ? (100 * visited) / p.total_units : 0;
+          const incNote = incompleteNotes.get(`${p.card_id}-${r}`);
+          return (
+            <tr key={p.card_id} onClick={() => setTarget({ card: p, round: r })}>
+              <td style={{ fontWeight: 700, color: "var(--c-primary)" }}>
+                {displayNo(p)}
+              </td>
+              <td className="tname">
+                {p.name}
+                {incNote && <div style={{ fontSize: 11, color: "#e65100" }}>🚨미완료</div>}
+              </td>
+              <td>{p.total_units}</td>
+              <td>{fmtDate(roundFirstDate(p, r))}</td>
+              <td>{roundPublisher(p, r) ?? ""}</td>
+              <td className={rateClass(pct)}>{pct.toFixed(1)}</td>
+            </tr>
+          );
+        }
+
         return (
           <div>
             <div className="round-tabs">
@@ -260,36 +366,38 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
                 </tr>
               </thead>
               <tbody>
-                {(showAllTable ? rows : rows.slice(0, 50)).map((p) => {
-                  const visited = roundVisited(p, r);
-                  const pct =
-                    p.total_units > 0 ? (100 * visited) / p.total_units : 0;
-                  const incNote = incompleteNotes.get(`${p.card_id}-${r}`);
-                  return (
-                    <tr key={p.card_id} onClick={() => setTarget({ card: p, round: r })}>
-                      <td style={{ fontWeight: 700, color: "var(--c-primary)" }}>
-                        {displayNo(p)}
+                {/* 1) 일반 구역카드 */}
+                {(showAllTable ? regularRows : regularRows.slice(0, 50)).map(renderTableRow)}
+
+                {/* 2) 상가 구역 분리 헤더 및 행 */}
+                {commRows.length > 0 && (
+                  <>
+                    <tr>
+                      <td
+                        colSpan={6}
+                        style={{
+                          background: "#f1f5f9",
+                          fontWeight: 700,
+                          textAlign: "center",
+                          color: "#334155",
+                          padding: "8px 0",
+                        }}
+                      >
+                        🏬 상가 구역 (501번~519번)
                       </td>
-                      <td className="tname">
-                        {p.name}
-                        {incNote && <div style={{ fontSize: 11, color: "#e65100" }}>🚨미완료</div>}
-                      </td>
-                      <td>{p.total_units}</td>
-                      <td>{fmtDate(roundFirstDate(p, r))}</td>
-                      <td>{roundPublisher(p, r) ?? ""}</td>
-                      <td className={rateClass(pct)}>{pct.toFixed(1)}</td>
                     </tr>
-                  );
-                })}
+                    {commRows.map(renderTableRow)}
+                  </>
+                )}
               </tbody>
             </table>
-            {!showAllTable && rows.length > 50 && (
+            {!showAllTable && regularRows.length > 50 && (
               <button
                 className="btn-line"
                 style={{ width: "100%", marginTop: 8 }}
                 onClick={() => setShowAllTable(true)}
               >
-                전체보기 (나머지 {rows.length - 50}개)
+                전체보기 (나머지 {regularRows.length - 50}개)
               </button>
             )}
           </div>
@@ -308,10 +416,10 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
             setTarget(null);
           }}
           onUnassign={() => {
+            const t = target;
             setTarget(null);
-            doUnassign(target.card, target.round);
+            doUnassign(t.card, t.round);
           }}
-          onError={setError}
         />
       )}
     </div>
@@ -326,7 +434,6 @@ function AssignModal({
   onClose,
   onDone,
   onUnassign,
-  onError,
 }: {
   target: AssignTarget;
   existingPublisher: string | null;
@@ -335,32 +442,35 @@ function AssignModal({
   onClose: () => void;
   onDone: (publisherName: string) => void;
   onUnassign: () => void;
-  onError: (msg: string) => void;
 }) {
-  const [publisherId, setPublisherId] = useState("");
-  const [pubQuery, setPubQuery] = useState("");
-  const [conductorId, setConductorId] = useState(
-    () => localStorage.getItem("lastAssignerId") ?? ""
-  );
+  const [selectedConductor, setSelectedConductor] = useState<string>("");
+  const [selectedPublisher, setSelectedPublisher] = useState<string>("");
   const [busy, setBusy] = useState(false);
-  const filteredPubs = publishers.filter((p) => matchName(p.name, pubQuery));
-  const selectedPubName = publishers.find((p) => p.id === publisherId)?.name;
+  const [error, setError] = useState("");
+  const [searchPub, setSearchPub] = useState("");
 
-  async function submit() {
-    if (!publisherId || !conductorId) return;
+  const filteredPublishers = useMemo(() => {
+    const q = searchPub.trim();
+    if (!q) return publishers;
+    return publishers.filter((p) => matchName(p.name, q));
+  }, [publishers, searchPub]);
+
+  async function handleAssign() {
+    if (!selectedConductor || !selectedPublisher) return;
     setBusy(true);
+    setError("");
     try {
-      await assignCard({
-        card_id: target.card.card_id,
-        round_no: target.round,
-        publisher_id: publisherId,
-        assigned_by: conductorId,
-      });
-      localStorage.setItem("lastAssignerId", conductorId);
-      onDone(publishers.find((p) => p.id === publisherId)?.name ?? "");
+      await assignCard(
+        target.card.card_id,
+        target.round,
+        selectedPublisher,
+        selectedConductor
+      );
+      const pub = publishers.find((p) => p.id === selectedPublisher);
+      onDone(pub?.name ?? "");
     } catch (e) {
-      onError(friendlyError(e));
-      onClose();
+      setError(friendlyError(e));
+      setBusy(false);
     }
   }
 
@@ -370,79 +480,75 @@ function AssignModal({
         <h3>
           {displayNo(target.card)}번 {target.card.name} — {target.round}회차 배정
         </h3>
-        {existingPublisher && (
-          <div className="notice">
-            현재 <b>{existingPublisher}</b> 님에게 배정되어 있습니다. 다른 사람을
-            선택하면 재배정됩니다.
-          </div>
-        )}
+
+        {error && <div className="error-msg">{error}</div>}
+
         <div className="field">
-          <label>
-            전도인 (카드를 받을 사람)
-            {selectedPubName && (
-              <span style={{ color: "var(--c-primary)" }}> — 선택: {selectedPubName}</span>
-            )}
-          </label>
+          <label>봉사인도자 선택 (필수)</label>
+          <div className="choice-grid">
+            {conductors.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={`choice-btn ${selectedConductor === c.id ? "selected" : ""}`}
+                onClick={() => setSelectedConductor(c.id)}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="field">
+          <label>전도인 검색 및 선택 (필수)</label>
           <input
             type="text"
-            value={pubQuery}
-            onChange={(e) => setPubQuery(e.target.value)}
-            placeholder="이름 또는 초성 (예: ㄱㅅㅊ)"
+            value={searchPub}
+            onChange={(e) => setSearchPub(e.target.value)}
+            placeholder="이름 또는 초성 (예: ㄱㄱㅁ)"
+            style={{ marginBottom: 6 }}
           />
-          <div
-            style={{
-              maxHeight: 220,
-              overflowY: "auto",
-              border: "1px solid var(--c-border)",
-              borderRadius: 10,
-              marginTop: 6,
-            }}
-          >
-            {filteredPubs.length === 0 && (
-              <div className="muted" style={{ padding: 10 }}>검색 결과가 없습니다</div>
-            )}
-            {filteredPubs.map((p) => (
+          <div className="choice-grid" style={{ maxHeight: 180, overflowY: "auto" }}>
+            {filteredPublishers.map((p) => (
               <button
                 key={p.id}
-                className={`choice-btn ${publisherId === p.id ? "selected" : ""}`}
-                style={{ marginBottom: 0, borderRadius: 0, border: "none", borderBottom: "1px solid var(--c-border)" }}
-                onClick={() => setPublisherId(p.id)}
+                type="button"
+                className={`choice-btn ${selectedPublisher === p.id ? "selected" : ""}`}
+                onClick={() => setSelectedPublisher(p.id)}
               >
                 {p.name}
               </button>
             ))}
           </div>
         </div>
-        <div className="field">
-          <label>배정하는 인도자 (내 이름)</label>
-          <select value={conductorId} onChange={(e) => setConductorId(e.target.value)}>
-            <option value="">— 선택 —</option>
-            {conductors.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
+
         <button
           className="btn-primary"
-          disabled={busy || !publisherId || !conductorId}
-          onClick={submit}
+          disabled={busy || !selectedConductor || !selectedPublisher}
+          onClick={handleAssign}
         >
-          {busy ? "배정 중..." : existingPublisher ? "재배정하기" : "배정하기"}
+          {busy ? "배정 중..." : "배정 완료"}
         </button>
+
         {existingPublisher && (
           <button
-            className="choice-btn danger"
-            style={{ marginTop: 8 }}
+            type="button"
+            className="btn-danger"
+            style={{ width: "100%", marginTop: 8 }}
             disabled={busy}
             onClick={onUnassign}
           >
-            배정 회수 (배정 취소)
+            배정 취소 (회수)
           </button>
         )}
-        <button className="choice-btn" style={{ marginTop: 8 }} onClick={onClose}>
-          취소
+
+        <button
+          type="button"
+          className="choice-btn"
+          style={{ marginTop: 8 }}
+          onClick={onClose}
+        >
+          닫기
         </button>
       </div>
     </div>

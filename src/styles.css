@@ -375,3 +375,54 @@ input, select {
   .report-table th, .report-table td { padding: 2px 3px; }
   @page { size: A4 landscape; margin: 10mm; }
 }
+
+/* 회차 순환 및 상가 구역 구분선 */
+.round-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 18px 0 10px;
+  padding: 11px 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  color: #1e40af;
+  font-weight: 700;
+  font-size: var(--fs-base);
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.08);
+}
+
+.commercial-divider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 24px 0 10px;
+  padding: 11px 14px;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  color: #1e293b;
+  font-weight: 700;
+  font-size: var(--fs-base);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.commercial-divider .count-badge {
+  font-size: var(--fs-small);
+  background: #475569;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.round-badge-2 {
+  font-size: var(--fs-small);
+  background: #2563eb;
+  color: #fff;
+  padding: 3px 8px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  font-weight: 700;
+}

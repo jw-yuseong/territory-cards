@@ -279,31 +279,51 @@ export default function CardDetail({
         setConductors(cs);
         setPublishers(ps);
         setCautions(ct);
-        setIncompleteNotes(inc.filter(n => n.card_id === card.id));
-        // 기본 회차 정하기:
-        //  1) 오늘 이미 이 카드에 기록했다면 그 회차 (봉사를 이어서 하는 경우)
-        //  2) 인도자가 배정해뒀는데 아직 기록이 없는 회차가 있으면 그 회차
-        //     (1회차 배정이면 1회차, 2회차 배정이면 2회차가 바로 열림)
-        //  3) 아니면 아직 방문 기록이 없는 첫 회차
+        const incForCard = inc.filter((n) => n.card_id === card.id);
+        setIncompleteNotes(incForCard);
+
         const todayStr = today();
         const todayVisits = v.filter((x) => x.visited_date === todayStr);
-        const assignedNoVisit = a
-          .filter((x) => !v.some((vv) => vv.round_no === x.round_no))
-          .map((x) => x.round_no)
-          .sort((x, y) => x - y)[0];
+        const totalUnitCount = u.length;
+
+        // 해당 회차가 완료되었는지 판별
+        function isRoundComplete(r: number): boolean {
+          if (totalUnitCount === 0) return false;
+          // 미완료 보고가 있으면 아직 완료 아님
+          if (incForCard.some((n) => n.round_no === r)) return false;
+          const rVisits = v.filter((x) => x.round_no === r);
+          const visitedCount = new Set(rVisits.map((x) => x.unit_id)).size;
+          // 전체 가구수 이상 방문한 경우
+          if (visitedCount >= totalUnitCount) return true;
+          // 다음 회차에 이미 방문 기록이나 배정이 있으면 이전 회차는 완료된 것
+          if (r < 4 && (v.some((x) => x.round_no > r) || a.some((x) => x.round_no > r))) return true;
+          // 과거에 방문 기록이 있고(오늘 방문 중이 아님) 미완료 메모도 없으면 완료된 것
+          if (visitedCount > 0 && !rVisits.some((x) => x.visited_date === todayStr)) return true;
+          return false;
+        }
+
+        // 기본 회차 정하기:
+        //  1) 오늘 이미 이 카드에 기록했다면 그 회차 (봉사를 이어서 하는 경우)
+        //  2) 인도자가 배정해뒀는데 아직 완료되지 않은 회차
+        //  3) 아직 완료되지 않은 첫 번째 회차 (1차가 완료되었으면 자동으로 2차!)
         let chosen: number;
         if (todayVisits.length > 0) {
           chosen = Math.max(...todayVisits.map((x) => x.round_no));
-        } else if (assignedNoVisit) {
-          // 인도자가 배정했는데 아직 방문 안 한 회차 -> 그 회차로 열림
-          chosen = assignedNoVisit;
-        } else if (a.length > 0) {
-          // 배정만 있는 회차(방문 완료 포함) -> 배정된 내용이 보이도록 그 회차
-          chosen = Math.min(...a.map((x) => x.round_no));
         } else {
-          chosen = 1;
-          for (; chosen < 4; chosen++) {
-            if (!v.some((x) => x.round_no === chosen)) break;
+          // 배정되어 아직 완료되지 않은 회차가 있는지 확인
+          const activeAssigned = a
+            .map((x) => x.round_no)
+            .filter((r) => !isRoundComplete(r))
+            .sort((x, y) => x - y)[0];
+
+          if (activeAssigned) {
+            chosen = activeAssigned;
+          } else {
+            // 배정이 없거나 배정된 회차가 이미 완료되었으면, 아직 완료되지 않은 첫 번째 회차 선택!
+            chosen = 1;
+            while (chosen < 4 && isRoundComplete(chosen)) {
+              chosen++;
+            }
           }
         }
         setRound(chosen);

@@ -103,3 +103,60 @@ export interface CardIncompleteNote {
   note: string;
   updated_at: string;
 }
+
+/** 501~519번 상가 구역카드 여부 판별 */
+export function isCommercialCard(c: {
+  legacy_number?: number | null;
+  card_number?: number;
+  name?: string;
+}): boolean {
+  const num = c.legacy_number ?? c.card_number;
+  if (num !== undefined && num !== null && num >= 501 && num <= 519) return true;
+  if (c.name && c.name.startsWith("(상)")) return true;
+  return false;
+}
+
+/** 카드의 특정 회차가 완료되었는지 판별 */
+export function isCardRoundDone(
+  p: CardProgress,
+  round: number,
+  incompleteNote?: CardIncompleteNote
+): boolean {
+  if (p.total_units === 0) return false;
+  // 미완료 보고가 있으면 해당 회차는 완료되지 않음
+  if (incompleteNote && incompleteNote.round_no === round) return false;
+
+  const visited = roundVisited(p, round);
+  // 1) 전체 가구수를 모두 방문한 경우
+  if (visited >= p.total_units) return true;
+
+  // 2) 다음 회차에 이미 방문 기록이나 배정이 있으면 이전 회차는 완료된 것
+  if (round < 4) {
+    if (roundVisited(p, round + 1) > 0 || roundPublisher(p, round + 1)) {
+      return true;
+    }
+  }
+
+  // 3) 방문 기록이 있고, 오늘 방문 중이 아니며, 미완료 메모도 없는 경우 (과거 완료)
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  if (visited > 0 && p.last_visited_date !== todayStr) {
+    return true;
+  }
+
+  return false;
+}
+
+/** 카드가 현재 진행해야 하는 활성 회차 (1~4) */
+export function getCardActiveRound(
+  p: CardProgress,
+  incompleteNotesMap?: Map<string, CardIncompleteNote>
+): number {
+  for (let r = 1; r <= 3; r++) {
+    const inc = incompleteNotesMap?.get(`${p.card_id}-${r}`) ?? incompleteNotesMap?.get(p.card_id);
+    if (!isCardRoundDone(p, r, inc)) {
+      return r;
+    }
+  }
+  return 4;
+}
