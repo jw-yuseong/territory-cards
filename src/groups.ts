@@ -24,6 +24,23 @@ export interface GroupBlock {
   items: ParsedUnit[];
 }
 
+/** 관리자가 '그룹에서 분리'한 독립 1줄 세대 표시자 (Zero-Width Space) */
+export const STANDALONE_MARKER = "\u200B";
+/** 관리자가 명시적으로 생성/지정한 그룹 시작 세대 표시자 (Zero-Width Non-Joiner) */
+export const GROUP_START_MARKER = "\u200C";
+/** 관리자가 명시적으로 그룹에 포함시킨 하위 세대 표시자 (Zero-Width Joiner) */
+export const GROUP_MEMBER_MARKER = "\u200D";
+
+/** 관리자 그룹 편집 표시자가 포함되어 있는지 확인 */
+export function hasAdminGroupMarker(s: string): boolean {
+  return /^[\u200B\u200C\u200D]/.test(s);
+}
+
+/** 표시/편집 시 보이지 않는 관리자 그룹 표시자 제거 */
+export function stripAdminMarkers(s: string): string {
+  return s.replace(/[\u200B\u200C\u200D]/g, "");
+}
+
 function stripParens(s: string): string {
   const t = s.trim();
   return t.startsWith("(") && t.endsWith(")") ? t.slice(1, -1).trim() : t;
@@ -332,7 +349,7 @@ export function normalizeCardUnitsDetailed(units: TerritoryUnit[]): NormalizeRes
   // 446번, 516번(방안 A) 카드는 모든 줄바꿈을 공백으로 1줄 평탄화
   if (FLATTEN_ALL_CARD_IDS.has(cardId)) {
     const normalized = units.map((u) => {
-      if (!/\r?\n/.test(u.address_unit)) return u;
+      if (hasAdminGroupMarker(u.address_unit) || !/\r?\n/.test(u.address_unit)) return u;
       const singleLine = u.address_unit
         .split(/\r?\n/)
         .map((s) => s.trim())
@@ -356,6 +373,7 @@ export function normalizeCardUnitsDetailed(units: TerritoryUnit[]): NormalizeRes
   // Pass 0: 사용자 컨펌 완료된 개별 세대 매핑 우선 적용
   const pass0 = afterPlanB.map((u) => {
     const key = `${u.card_id}:${u.seq_no}`;
+    if (hasAdminGroupMarker(u.address_unit)) return u;
     const override = EXPLICIT_UNIT_OVERRIDES[key];
     if (override !== undefined && override !== u.address_unit) {
       return { ...u, address_unit: override };
@@ -366,7 +384,7 @@ export function normalizeCardUnitsDetailed(units: TerritoryUnit[]): NormalizeRes
   // Pass 1: 괄호 내부 줄바꿈 결합(Rule A), 마지막 줄 괄호 메모 결합(Rule B), 층/호수 줄바꿈 결합(Rule C)
   const pass1 = pass0.map((u) => {
     const key = `${u.card_id}:${u.seq_no}`;
-    if (EXPLICIT_UNIT_OVERRIDES[key] !== undefined) return u;
+    if (hasAdminGroupMarker(u.address_unit) || EXPLICIT_UNIT_OVERRIDES[key] !== undefined) return u;
 
     const addr = u.address_unit;
     if (
@@ -424,7 +442,7 @@ export function normalizeCardUnitsDetailed(units: TerritoryUnit[]): NormalizeRes
   // Pass 2: 하위 호수(비도로명 1줄 집)가 하나도 없는 나홀로 다중줄 집을 1줄로 평탄화(Rule D)
   const finalUnits = pass1.map((u, idx) => {
     const key = `${u.card_id}:${u.seq_no}`;
-    if (EXPLICIT_UNIT_OVERRIDES[key] !== undefined) return u;
+    if (hasAdminGroupMarker(u.address_unit) || EXPLICIT_UNIT_OVERRIDES[key] !== undefined) return u;
 
     const addr = u.address_unit;
     if (
@@ -445,7 +463,8 @@ export function normalizeCardUnitsDetailed(units: TerritoryUnit[]): NormalizeRes
     for (let j = idx + 1; j < pass1.length; j++) {
       const followAddr = pass1[j].address_unit;
       if (/\r?\n/.test(followAddr)) break;
-      if (isRoadAddress(followAddr)) break;
+      if (followAddr.startsWith(STANDALONE_MARKER)) break;
+      if (!followAddr.startsWith(GROUP_MEMBER_MARKER) && isRoadAddress(stripAdminMarkers(followAddr))) break;
       nonRoadSubCount++;
     }
 
@@ -476,7 +495,7 @@ export function normalizeCardUnits(units: TerritoryUnit[]): TerritoryUnit[] {
 
 /** 주소 한 칸을 (그룹 제목 줄들, 호수)로 분해 */
 export function splitAddress(address: string): { groupTitle: string | null; label: string } {
-  const lines = address
+  const lines = stripAdminMarkers(address)
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l !== "");
@@ -502,7 +521,10 @@ export function buildGroups(units: TerritoryUnit[]): GroupBlock[] {
       current.items.push({ unit, group: groupTitle, label, definesGroup: true });
     } else {
       // 한 줄짜리 도로명주소 집이 앞 건물의 하위 그룹으로 잘못 빨려 들어가지 않도록 분리
-      if (!current || (current.group !== null && isRoadAddress(label))) {
+      const shouldBreakGroup =
+        unit.address_unit.startsWith(STANDALONE_MARKER) ||
+        (!unit.address_unit.startsWith(GROUP_MEMBER_MARKER) && isRoadAddress(label));
+      if (!current || (current.group !== null && shouldBreakGroup)) {
         current = { key: `top-${unit.id}`, group: null, items: [] };
         blocks.push(current);
       }
