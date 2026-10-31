@@ -908,14 +908,16 @@ export default function UnitEditor({
             setModal(null);
             setSelected(null);
             if (m.mode === "edit") {
-              // 기존 마커 유지 또는 다중줄 직접 입력 시 그룹 시작 마커 부여
-              let prefix = "";
+              // 기존 마커 유지 또는 다중줄 직접 입력 시 그룹 시작 마커 부여.
+              // 마커가 없던 1줄 주소도 관리자가 직접 수정한 경우 STANDALONE_MARKER를 부여하여
+              // groups.ts의 자동 정규화나 오버라이드가 관리자의 수정을 덮어쓰지 못하도록 보장.
+              let prefix = STANDALONE_MARKER;
               if (/\r?\n/.test(addr)) {
                 prefix = GROUP_START_MARKER;
-              } else if (m.unit.address_unit.startsWith(STANDALONE_MARKER)) {
-                prefix = STANDALONE_MARKER;
               } else if (m.unit.address_unit.startsWith(GROUP_MEMBER_MARKER)) {
                 prefix = GROUP_MEMBER_MARKER;
+              } else if (m.unit.address_unit.startsWith(STANDALONE_MARKER)) {
+                prefix = STANDALONE_MARKER;
               }
               await run(() => adminUpdateUnitAddress(m.unit.id, `${prefix}${addr}`));
             } else {
