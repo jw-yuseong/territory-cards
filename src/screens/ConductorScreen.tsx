@@ -469,13 +469,23 @@ function AssignModal({
   const [selectedPublisher, setSelectedPublisher] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [searchCond, setSearchCond] = useState("");
   const [searchPub, setSearchPub] = useState("");
+
+  const filteredConductors = useMemo(() => {
+    const q = searchCond.trim();
+    if (!q) return conductors;
+    return conductors.filter((c) => matchName(c.name, q));
+  }, [conductors, searchCond]);
 
   const filteredPublishers = useMemo(() => {
     const q = searchPub.trim();
     if (!q) return publishers;
     return publishers.filter((p) => matchName(p.name, q));
   }, [publishers, searchPub]);
+
+  const selectedCondName = conductors.find((c) => c.id === selectedConductor)?.name;
+  const selectedPubName = publishers.find((p) => p.id === selectedPublisher)?.name;
 
   async function handleAssign() {
     if (!selectedConductor || !selectedPublisher) return;
@@ -507,41 +517,70 @@ function AssignModal({
         {error && <div className="error-msg">{error}</div>}
 
         <div className="field">
-          <label>봉사인도자 선택 (필수)</label>
-          <div className="choice-grid">
-            {conductors.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                className={`choice-btn ${selectedConductor === c.id ? "selected" : ""}`}
-                onClick={() => setSelectedConductor(c.id)}
-              >
-                {c.name}
-              </button>
-            ))}
+          <label>
+            봉사인도자 검색 및 선택 (필수)
+            {selectedCondName && (
+              <span style={{ color: "var(--c-primary)", marginLeft: 6, fontWeight: 700 }}>
+                · 선택됨: {selectedCondName}
+              </span>
+            )}
+          </label>
+          <input
+            type="text"
+            value={searchCond}
+            onChange={(e) => setSearchCond(e.target.value)}
+            placeholder="인도자 이름 또는 초성 (예: ㄱㄱㅁ)"
+            style={{ marginBottom: 6 }}
+          />
+          <div className="choice-grid" style={{ maxHeight: 130, overflowY: "auto" }}>
+            {filteredConductors.length === 0 ? (
+              <div className="muted" style={{ padding: "8px 0" }}>검색 결과가 없습니다</div>
+            ) : (
+              filteredConductors.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`choice-btn ${selectedConductor === c.id ? "selected" : ""}`}
+                  onClick={() => setSelectedConductor(c.id)}
+                >
+                  {c.name}
+                </button>
+              ))
+            )}
           </div>
         </div>
 
         <div className="field">
-          <label>전도인 검색 및 선택 (필수)</label>
+          <label>
+            전도인 검색 및 선택 (필수)
+            {selectedPubName && (
+              <span style={{ color: "var(--c-primary)", marginLeft: 6, fontWeight: 700 }}>
+                · 선택됨: {selectedPubName}
+              </span>
+            )}
+          </label>
           <input
             type="text"
             value={searchPub}
             onChange={(e) => setSearchPub(e.target.value)}
-            placeholder="이름 또는 초성 (예: ㄱㄱㅁ)"
+            placeholder="전도인 이름 또는 초성 (예: ㄱㄱㅁ)"
             style={{ marginBottom: 6 }}
           />
-          <div className="choice-grid" style={{ maxHeight: 180, overflowY: "auto" }}>
-            {filteredPublishers.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`choice-btn ${selectedPublisher === p.id ? "selected" : ""}`}
-                onClick={() => setSelectedPublisher(p.id)}
-              >
-                {p.name}
-              </button>
-            ))}
+          <div className="choice-grid" style={{ maxHeight: 150, overflowY: "auto" }}>
+            {filteredPublishers.length === 0 ? (
+              <div className="muted" style={{ padding: "8px 0" }}>검색 결과가 없습니다</div>
+            ) : (
+              filteredPublishers.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`choice-btn ${selectedPublisher === p.id ? "selected" : ""}`}
+                  onClick={() => setSelectedPublisher(p.id)}
+                >
+                  {p.name}
+                </button>
+              ))
+            )}
           </div>
         </div>
 
