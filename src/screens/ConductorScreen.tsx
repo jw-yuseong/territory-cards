@@ -465,7 +465,7 @@ function AssignModal({
   onDone: (publisherName: string) => void;
   onUnassign: () => void;
 }) {
-  const [selectedConductor, setSelectedConductor] = useState<string>("");
+  const [selectedConductor, setSelectedConductor] = useState<string>(() => localStorage.getItem("lastAssignerId") ?? "");
   const [selectedPublisher, setSelectedPublisher] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -482,12 +482,13 @@ function AssignModal({
     setBusy(true);
     setError("");
     try {
-      await assignCard(
-        target.card.card_id,
-        target.round,
-        selectedPublisher,
-        selectedConductor
-      );
+      await assignCard({
+        card_id: target.card.card_id,
+        round_no: target.round,
+        publisher_id: selectedPublisher,
+        assigned_by: selectedConductor,
+      });
+      localStorage.setItem("lastAssignerId", selectedConductor);
       const pub = publishers.find((p) => p.id === selectedPublisher);
       onDone(pub?.name ?? "");
     } catch (e) {

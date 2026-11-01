@@ -582,19 +582,49 @@ export async function fetchMemoUnits(): Promise<MemoUnit[]> {
   return must(data as unknown as MemoUnit[], error);
 }
 
-export async function assignCard(a: {
-  card_id: string;
-  round_no: number;
-  publisher_id: string;
-  assigned_by: string;
-}): Promise<void> {
+export async function assignCard(
+  cardOrObj:
+    | {
+        card_id: string;
+        round_no: number;
+        publisher_id: string;
+        assigned_by: string;
+      }
+    | string,
+  round_no?: number,
+  publisher_id?: string,
+  assigned_by?: string
+): Promise<void> {
+  const p =
+    typeof cardOrObj === "string"
+      ? {
+          card_id: cardOrObj,
+          round_no: round_no!,
+          publisher_id: publisher_id!,
+          assigned_by: assigned_by!,
+        }
+      : cardOrObj;
+
   const { error } = await supabase.rpc("assign_card", {
-    p_card_id: a.card_id,
-    p_round: a.round_no,
-    p_publisher: a.publisher_id,
-    p_assigned_by: a.assigned_by,
+    p_card_id: p.card_id,
+    p_round: p.round_no,
+    p_publisher: p.publisher_id,
+    p_assigned_by: p.assigned_by,
   });
-  if (error) throw new Error(error.message);
+  if (!error) return;
+
+  console.warn("assign_card RPC failed, trying direct upsert fallback:", error);
+  const { error: upErr } = await supabase.from("card_assignments").upsert(
+    {
+      card_id: p.card_id,
+      round_no: p.round_no,
+      publisher_id: p.publisher_id,
+      assigned_by: p.assigned_by,
+      assigned_at: new Date().toISOString(),
+    },
+    { onConflict: "card_id,round_no" }
+  );
+  if (upErr) throw new Error(upErr.message || error.message);
 }
 
 export async function unassignCard(cardId: string, roundNo: number): Promise<void> {
@@ -602,7 +632,14 @@ export async function unassignCard(cardId: string, roundNo: number): Promise<voi
     p_card_id: cardId,
     p_round: roundNo,
   });
-  if (error) throw new Error(error.message);
+  if (!error) return;
+
+  console.warn("unassign_card RPC failed, trying direct delete fallback:", error);
+  const { error: delErr } = await supabase
+    .from("card_assignments")
+    .delete()
+    .match({ card_id: cardId, round_no: roundNo });
+  if (delErr) throw new Error(delErr.message || error.message);
 }
 
 export async function resetCard(cardId: string): Promise<void> {

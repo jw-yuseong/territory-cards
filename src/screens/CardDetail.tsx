@@ -23,6 +23,7 @@ import type {
   Publisher,
   TerritoryUnit,
   VisitRecord,
+  CardIncompleteNote,
 } from "../types";
 import { friendlyError } from "../errors";
 import { hapticCheck, hapticTap, hapticUncheck, hapticWarn } from "../haptics";
@@ -763,7 +764,7 @@ export default function CardDetail({
                       src={`${SUPABASE_URL}/storage/v1/object/public/maps/${numToCheck}.webp${mapTimestamp ? `?t=${mapTimestamp}` : ""}`}
                       onError={(e) => {
                         if (e.currentTarget.src.includes('supabase.co')) {
-                          e.currentTarget.src = `${import.meta.env.BASE_URL}maps/${numToCheck}.webp`;
+                          e.currentTarget.src = `${(import.meta as any).env?.BASE_URL || "/"}maps/${numToCheck}.webp`;
                         } else {
                           setImgFailed(true);
                         }
