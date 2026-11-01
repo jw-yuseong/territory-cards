@@ -466,6 +466,7 @@ function AssignModal({
   onUnassign: () => void;
 }) {
   const [selectedConductor, setSelectedConductor] = useState<string>(() => localStorage.getItem("lastAssignerId") ?? "");
+  const [isEditingCond, setIsEditingCond] = useState(false);
   const [selectedPublisher, setSelectedPublisher] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -516,39 +517,106 @@ function AssignModal({
 
         {error && <div className="error-msg">{error}</div>}
 
-        <div className="field">
-          <label>
-            봉사인도자 검색 및 선택 (필수)
-            {selectedCondName && (
-              <span style={{ color: "var(--c-primary)", marginLeft: 6, fontWeight: 700 }}>
-                · 선택됨: {selectedCondName}
-              </span>
-            )}
-          </label>
-          <input
-            type="text"
-            value={searchCond}
-            onChange={(e) => setSearchCond(e.target.value)}
-            placeholder="인도자 이름 또는 초성 (예: ㄱㄱㅁ)"
-            style={{ marginBottom: 6 }}
-          />
-          <div className="choice-grid" style={{ maxHeight: 130, overflowY: "auto" }}>
-            {filteredConductors.length === 0 ? (
-              <div className="muted" style={{ padding: "8px 0" }}>검색 결과가 없습니다</div>
-            ) : (
-              filteredConductors.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={`choice-btn ${selectedConductor === c.id ? "selected" : ""}`}
-                  onClick={() => setSelectedConductor(c.id)}
+        {selectedCondName && !isEditingCond ? (
+          <div className="field">
+            <label>봉사인도자</label>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "9px 14px",
+                background: "#f8fafc",
+                border: "1.5px solid var(--c-primary)",
+                borderRadius: 10,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>👤</span>
+                <span
+                  style={{
+                    fontSize: "var(--fs-base)",
+                    fontWeight: 700,
+                    color: "var(--c-primary)",
+                  }}
                 >
-                  {c.name}
-                </button>
-              ))
-            )}
+                  {selectedCondName}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn-line"
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 13,
+                  height: "auto",
+                  borderColor: "var(--c-primary)",
+                  color: "var(--c-primary)",
+                }}
+                onClick={() => {
+                  setIsEditingCond(true);
+                  setSearchCond("");
+                }}
+              >
+                변경
+              </button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="field">
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 6,
+              }}
+            >
+              <label style={{ margin: 0 }}>봉사인도자 검색 및 선택 (필수)</label>
+              {selectedCondName && (
+                <button
+                  type="button"
+                  className="btn-line"
+                  style={{ padding: "2px 8px", fontSize: 12, height: "auto" }}
+                  onClick={() => {
+                    setIsEditingCond(false);
+                    setSearchCond("");
+                  }}
+                >
+                  닫기
+                </button>
+              )}
+            </div>
+            <input
+              type="text"
+              value={searchCond}
+              autoFocus={isEditingCond}
+              onChange={(e) => setSearchCond(e.target.value)}
+              placeholder="인도자 이름 또는 초성 (예: ㄱㄱㅁ)"
+              style={{ marginBottom: 6 }}
+            />
+            <div className="choice-grid" style={{ maxHeight: 130, overflowY: "auto" }}>
+              {filteredConductors.length === 0 ? (
+                <div className="muted" style={{ padding: "8px 0" }}>검색 결과가 없습니다</div>
+              ) : (
+                filteredConductors.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className={`choice-btn ${selectedConductor === c.id ? "selected" : ""}`}
+                    onClick={() => {
+                      setSelectedConductor(c.id);
+                      setIsEditingCond(false);
+                      setSearchCond("");
+                    }}
+                  >
+                    {c.name}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="field">
           <label>
@@ -563,6 +631,7 @@ function AssignModal({
             type="text"
             value={searchPub}
             onChange={(e) => setSearchPub(e.target.value)}
+            autoFocus={!isEditingCond}
             placeholder="전도인 이름 또는 초성 (예: ㄱㄱㅁ)"
             style={{ marginBottom: 6 }}
           />
