@@ -169,7 +169,7 @@ export function getCardMaxDoneRound(
   let maxDone = 0;
   for (let r = 1; r <= 4; r++) {
     const inc = incompleteNotesMap?.get(`${p.card_id}-${r}`) ?? incompleteNotesMap?.get(p.card_id);
-    if (isCardRoundDone(p, r, inc)) {
+    if (isCardRoundDone(p, r, inc) || (roundVisited(p, r) > 0 && !(inc && inc.round_no === r))) {
       maxDone = r;
     }
   }
