@@ -160,3 +160,18 @@ export function getCardActiveRound(
   }
   return 4;
 }
+
+/** 카드가 지금까지 완료한 가장 높은 회차 (완료된 회차가 없으면 0, 최대 4) */
+export function getCardMaxDoneRound(
+  p: CardProgress,
+  incompleteNotesMap?: Map<string, CardIncompleteNote>
+): number {
+  let maxDone = 0;
+  for (let r = 1; r <= 4; r++) {
+    const inc = incompleteNotesMap?.get(`${p.card_id}-${r}`) ?? incompleteNotesMap?.get(p.card_id);
+    if (isCardRoundDone(p, r, inc)) {
+      maxDone = r;
+    }
+  }
+  return maxDone;
+}

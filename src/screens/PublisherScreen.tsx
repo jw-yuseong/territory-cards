@@ -7,6 +7,7 @@ import {
   isCommercialCard,
   isCardRoundDone,
   getCardActiveRound,
+  getCardMaxDoneRound,
   roundPublisher,
   roundVisited,
 } from "../types";
@@ -195,6 +196,8 @@ export default function PublisherScreen() {
     const incNote = incompleteNotes.get(`${c.id}-${targetRound}`) ?? incompleteNotes.get(c.id);
     const visited = pg ? roundVisited(pg, targetRound) : 0;
     const isDone = pg ? isCardRoundDone(pg, targetRound, incNote) : false;
+    const maxDone = pg ? getCardMaxDoneRound(pg, incompleteNotes) : 0;
+    const doneRound = maxDone > 0 ? maxDone : targetRound;
 
     return (
       <button key={`${c.id}-${targetRound}`} className="card-item" onClick={() => openCard(c)}>
@@ -210,7 +213,7 @@ export default function PublisherScreen() {
         </span>
         {isDone ? (
           <span className="done-badge">
-            {isCommercial ? "상가 · 1회 완료" : "1회 방문완료"}
+            {isCommercial ? `상가 · ${doneRound}회 완료` : `${doneRound}회 방문완료`}
           </span>
         ) : isCommercial ? (
           <span className="caution-badge soft" style={{ background: "#475569" }}>
@@ -261,7 +264,14 @@ export default function PublisherScreen() {
             const isComm = isCommercialCard(c);
             const pg = progressMap.get(c.id);
             const ar = pg ? getCardActiveRound(pg, incompleteNotes) : 1;
-            return renderCardItem(c, ar, isComm);
+            const maxDone = pg ? getCardMaxDoneRound(pg, incompleteNotes) : 0;
+            const hasActiveNext =
+              pg &&
+              (roundPublisher(pg, ar) !== null ||
+                roundVisited(pg, ar) > 0 ||
+                incompleteNotes.has(`${c.id}-${ar}`));
+            const displayRound = maxDone > 0 && !hasActiveNext ? maxDone : ar;
+            return renderCardItem(c, displayRound, isComm);
           })}
         </div>
       )}
@@ -324,8 +334,16 @@ export default function PublisherScreen() {
               </button>
               {showCompleted && (
                 <div style={{ marginTop: 10 }}>
-                  {completedRegular.map((c) => renderCardItem(c, 1, false))}
-                  {completedComm.map((c) => renderCardItem(c, 1, true))}
+                  {completedRegular.map((c) => {
+                    const pg = progressMap.get(c.id);
+                    const doneRound = pg ? Math.max(1, getCardMaxDoneRound(pg, incompleteNotes)) : 1;
+                    return renderCardItem(c, doneRound, false);
+                  })}
+                  {completedComm.map((c) => {
+                    const pg = progressMap.get(c.id);
+                    const doneRound = pg ? Math.max(1, getCardMaxDoneRound(pg, incompleteNotes)) : 1;
+                    return renderCardItem(c, doneRound, true);
+                  })}
                 </div>
               )}
             </div>

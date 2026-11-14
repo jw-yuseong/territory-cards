@@ -7,6 +7,7 @@ import {
   isCommercialCard,
   isCardRoundDone,
   getCardActiveRound,
+  getCardMaxDoneRound,
   roundFirstDate,
   roundPublisher,
   roundVisited,
@@ -149,6 +150,8 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
     const pub = roundPublisher(p, targetRound);
     const incNote = incompleteNotes.get(`${p.card_id}-${targetRound}`);
     const isDone = isCardRoundDone(p, targetRound, incNote);
+    const maxDone = getCardMaxDoneRound(p, incompleteNotes);
+    const doneRound = maxDone > 0 ? maxDone : targetRound;
 
     return (
       <button
@@ -168,7 +171,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
         </span>
         {isDone ? (
           <span className="done-badge">
-            {isCommercial ? "상가 · 1회 완료" : "1회 방문완료"}
+            {isCommercial ? `상가 · ${doneRound}회 완료` : `${doneRound}회 방문완료`}
           </span>
         ) : isCommercial ? (
           <span className="caution-badge soft" style={{ background: "#475569" }}>
@@ -323,6 +326,8 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
           const pct = p.total_units > 0 ? (100 * visited) / p.total_units : 0;
           const incNote = incompleteNotes.get(`${p.card_id}-${r}`);
           const isDone = isCardRoundDone(p, r, incNote);
+          const maxDone = getCardMaxDoneRound(p, incompleteNotes);
+          const doneRound = maxDone >= r ? maxDone : r;
 
           return (
             <tr key={p.card_id} onClick={() => setTarget({ card: p, round: r })}>
@@ -334,7 +339,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
                 {incNote && <div style={{ fontSize: 11, color: "#e65100" }}>🚨미완료</div>}
                 {isDone && !incNote && (
                   <span style={{ fontSize: 11, color: "#16a34a", fontWeight: 700, marginLeft: 4 }}>
-                    ✓1회완료
+                    ✓{doneRound}회완료
                   </span>
                 )}
               </td>
