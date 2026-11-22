@@ -143,6 +143,13 @@ function checkApplicationWindow(
   return { allowed: true, status: "open", openAtStr, closeAtStr };
 }
 
+const CANCEL_REASON_PRESETS = [
+  "건강 / 컨디션 문제",
+  "직장 / 학업 / 가족 일정",
+  "날짜·시간 착오 (잘못 신청함)",
+  "개인 사정 (급한 용무)",
+] as const;
+
 export default function CartScreen({
   isAdmin = false,
   isConductor = false,
@@ -170,8 +177,10 @@ export default function CartScreen({
 
   // 신청 불가 시간 안내 팝업 모달
   const [popupMessage, setPopupMessage] = useState<string | null>(null);
-  // 신청 취소 확인 팝업 모달 대상
+  // 신청 취소 확인 팝업 모달 대상 및 취소 사유 상태
   const [confirmCancelApp, setConfirmCancelApp] = useState<CartApplication | null>(null);
+  const [cancelReasonChoice, setCancelReasonChoice] = useState<string>(CANCEL_REASON_PRESETS[0]);
+  const [cancelReasonCustom, setCancelReasonCustom] = useState<string>("");
 
   // 신청 화면에서 전도인 검색 및 선택 상태
   const [searchPub, setSearchPub] = useState("");
@@ -341,19 +350,29 @@ export default function CartScreen({
         return;
       }
     }
+    setCancelReasonChoice(CANCEL_REASON_PRESETS[0]);
+    setCancelReasonCustom("");
     setConfirmCancelApp(app);
   }
 
   async function executeCancel() {
     if (!confirmCancelApp) return;
+    const finalReason =
+      cancelReasonChoice === "custom" ? cancelReasonCustom.trim() : cancelReasonChoice;
+    if (!finalReason) {
+      setError("취소 사유를 입력해 주세요.");
+      return;
+    }
     const app = confirmCancelApp;
     setConfirmCancelApp(null);
     setBusy(true);
     setError("");
     setMsg("");
     try {
-      await cancelCartSlot(app.id);
-      setMsg(`'${app.publisher_name}' 전도인의 신청이 취소되어 '신청 취소자' 명단으로 이동되었습니다.`);
+      await cancelCartSlot(app.id, finalReason);
+      setMsg(
+        `'${app.publisher_name}' 전도인의 신청이 취소되어 '신청 취소자' 명단으로 이동되었습니다. (사유: ${finalReason})`
+      );
       const apps = await fetchCartApplications(queryRange.startYmd, queryRange.endYmd);
       setApplications(apps);
     } catch (e) {
@@ -461,26 +480,65 @@ export default function CartScreen({
     </div>
   );
 
-  // 신청 취소 재확인 팝업 모달
+  // 신청 취소 재확인 및 사유 선택 팝업 모달
   const cancelConfirmModal = confirmCancelApp && (
     <div className="modal-back" onClick={() => setConfirmCancelApp(null)}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>⚠ 전시대 신청 취소 확인</h3>
         <div
           className="notice"
-          style={{ lineHeight: 1.6, fontSize: "var(--fs-base)", marginBottom: 14 }}
+          style={{ lineHeight: 1.6, fontSize: "var(--fs-base)", marginBottom: 12 }}
         >
           정말 <b style={{ color: "var(--c-danger)" }}>'{confirmCancelApp.publisher_name}'</b> 전도인의 전시대 신청을 취소하는 것이 맞습니까?
-          <div className="muted" style={{ marginTop: 6, fontSize: "var(--fs-small)" }}>
-            취소하면 삭제되지 않고 아래 '신청 취소자' 명단으로 이동되며, 언제든 다시 신청(복구)할 수 있습니다.
-          </div>
         </div>
+
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label>취소 사유 선택</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {CANCEL_REASON_PRESETS.map((reason) => (
+              <button
+                key={reason}
+                type="button"
+                className={`choice-btn ${cancelReasonChoice === reason ? "selected" : ""}`}
+                onClick={() => setCancelReasonChoice(reason)}
+                style={{ textAlign: "left" }}
+              >
+                {cancelReasonChoice === reason ? "✓ " : ""}
+                {reason}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`choice-btn ${cancelReasonChoice === "custom" ? "selected" : ""}`}
+              onClick={() => setCancelReasonChoice("custom")}
+              style={{ textAlign: "left" }}
+            >
+              {cancelReasonChoice === "custom" ? "✓ " : ""}
+              직접 입력
+            </button>
+          </div>
+          {cancelReasonChoice === "custom" && (
+            <input
+              type="text"
+              value={cancelReasonCustom}
+              onChange={(e) => setCancelReasonCustom(e.target.value)}
+              placeholder="취소 사유를 직접 입력해 주세요"
+              autoFocus
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </div>
+
+        <div className="muted" style={{ marginBottom: 12, fontSize: "var(--fs-small)" }}>
+          취소하면 삭제되지 않고 아래 '신청 취소자' 명단으로 이동되며, 언제든 다시 신청(복구)할 수 있습니다.
+        </div>
+
         <div className="row">
           <button
             type="button"
             className="btn-danger"
             style={{ flex: 1 }}
-            disabled={busy}
+            disabled={busy || (cancelReasonChoice === "custom" && !cancelReasonCustom.trim())}
             onClick={executeCancel}
           >
             예, 취소합니다
@@ -721,11 +779,25 @@ export default function CartScreen({
                         color: "#64748b",
                       }}
                     >
-                      <span style={{ textDecoration: "line-through" }}>
-                        {a.publisher_name}
-                        {canPlanTeams && (
-                          <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 3 }}>
-                            ({cnt}회)
+                      <span>
+                        <span style={{ textDecoration: "line-through" }}>
+                          {a.publisher_name}
+                          {canPlanTeams && (
+                            <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 3 }}>
+                              ({cnt}회)
+                            </span>
+                          )}
+                        </span>
+                        {a.cancel_reason && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 400,
+                              marginLeft: 4,
+                              color: "#94a3b8",
+                            }}
+                          >
+                            · {a.cancel_reason}
                           </span>
                         )}
                       </span>
@@ -1016,9 +1088,13 @@ export default function CartScreen({
                     }}
                   >
                     신청 취소자 ({cancelledApps.length}명):{" "}
-                    <span style={{ textDecoration: "line-through" }}>
-                      {cancelledApps.map((a) => a.publisher_name).join(", ")}
-                    </span>
+                    {cancelledApps.map((a, idx) => (
+                      <span key={a.id}>
+                        {idx > 0 ? ", " : ""}
+                        <span style={{ textDecoration: "line-through" }}>{a.publisher_name}</span>
+                        {a.cancel_reason ? `(${a.cancel_reason})` : ""}
+                      </span>
+                    ))}
                   </div>
                 )}
               </div>

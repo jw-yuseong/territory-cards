@@ -1226,6 +1226,7 @@ export async function fetchCartApplications(
     created_at: string;
     is_cancelled?: boolean;
     cancelled_at?: string | null;
+    cancel_reason?: string | null;
     cart_publishers: { name: string } | { name: string }[] | null;
   };
 
@@ -1233,22 +1234,34 @@ export async function fetchCartApplications(
   const { data, error } = await supabase
     .from("cart_applications")
     .select(
-      "id, schedule_id, service_date, publisher_id, created_at, is_cancelled, cancelled_at, cart_publishers(name)"
+      "id, schedule_id, service_date, publisher_id, created_at, is_cancelled, cancelled_at, cancel_reason, cart_publishers(name)"
     )
     .gte("service_date", startDate)
     .lte("service_date", endDate)
     .order("created_at");
 
   if (error) {
-    // patch21_cart_cancel_status.sql 적용 전일 경우 구 스키마로 조회 폴백
-    const { data: fbData, error: fbErr } = await supabase
+    // cancel_reason 또는 is_cancelled 컬럼 적용 전일 경우 단계별 폴백
+    const { data: fb1Data, error: fb1Err } = await supabase
       .from("cart_applications")
-      .select("id, schedule_id, service_date, publisher_id, created_at, cart_publishers(name)")
+      .select(
+        "id, schedule_id, service_date, publisher_id, created_at, is_cancelled, cancelled_at, cart_publishers(name)"
+      )
       .gte("service_date", startDate)
       .lte("service_date", endDate)
       .order("created_at");
-    if (fbErr) throw new Error(fbErr.message);
-    rows = (fbData ?? []) as unknown as RawRow[];
+    if (!fb1Err) {
+      rows = (fb1Data ?? []) as unknown as RawRow[];
+    } else {
+      const { data: fb2Data, error: fb2Err } = await supabase
+        .from("cart_applications")
+        .select("id, schedule_id, service_date, publisher_id, created_at, cart_publishers(name)")
+        .gte("service_date", startDate)
+        .lte("service_date", endDate)
+        .order("created_at");
+      if (fb2Err) throw new Error(fb2Err.message);
+      rows = (fb2Data ?? []) as unknown as RawRow[];
+    }
   } else {
     rows = (data ?? []) as unknown as RawRow[];
   }
@@ -1264,6 +1277,7 @@ export async function fetchCartApplications(
       created_at: r.created_at,
       is_cancelled: Boolean(r.is_cancelled),
       cancelled_at: r.cancelled_at ?? null,
+      cancel_reason: r.cancel_reason ?? null,
     };
   });
 }
@@ -1290,9 +1304,16 @@ export async function applyCartSlot(
       // 신청 취소자 명단에 있던 사람이 다시 신청하면 원래대로 복구
       const { error: upErr } = await supabase
         .from("cart_applications")
-        .update({ is_cancelled: false, cancelled_at: null })
+        .update({ is_cancelled: false, cancelled_at: null, cancel_reason: null })
         .eq("id", row.id);
-      if (upErr) throw new Error(upErr.message);
+      if (upErr) {
+        // cancel_reason 컬럼이 없을 경우 폴백
+        const { error: upErr2 } = await supabase
+          .from("cart_applications")
+          .update({ is_cancelled: false, cancelled_at: null })
+          .eq("id", row.id);
+        if (upErr2) throw new Error(upErr2.message);
+      }
       return;
     }
     throw new Error("이미 이 시간대에 신청하셨습니다.");
@@ -1311,21 +1332,37 @@ export async function applyCartSlot(
   }
 }
 
-export async function cancelCartSlot(applicationId: string): Promise<void> {
-  // 삭제하지 않고 신청 취소자 명단(is_cancelled = true)으로 이동
+export async function cancelCartSlot(applicationId: string, reason: string): Promise<void> {
+  const trimmedReason = reason.trim();
+  const nowIso = new Date().toISOString();
+
+  // 1차: 취소 상태 + 취소 사유(cancel_reason) 함께 저장
   const { data, error } = await supabase
     .from("cart_applications")
     .update({
       is_cancelled: true,
-      cancelled_at: new Date().toISOString(),
+      cancelled_at: nowIso,
+      cancel_reason: trimmedReason || null,
     })
     .eq("id", applicationId)
     .select("id");
 
   if (!error && data && data.length > 0) return;
 
-  // 만약 patch21 SQL 적용 전이거나 UPDATE 권한이 아직 없을 때를 위한 폴백
-  console.warn("cancelCartSlot soft-cancel failed, falling back to delete:", error);
+  // 2차 폴백: cancel_reason 컬럼이 아직 없을 때 is_cancelled만 업데이트
+  const { data: fbData, error: fbError } = await supabase
+    .from("cart_applications")
+    .update({
+      is_cancelled: true,
+      cancelled_at: nowIso,
+    })
+    .eq("id", applicationId)
+    .select("id");
+
+  if (!fbError && fbData && fbData.length > 0) return;
+
+  // 3차 폴백: patch21 SQL 적용 전일 경우 delete
+  console.warn("cancelCartSlot soft-cancel failed, falling back to delete:", error || fbError);
   const { error: delErr } = await supabase
     .from("cart_applications")
     .delete()

@@ -421,9 +421,13 @@ export default function CartTeamPlanner({
             }}
           >
             신청 취소자 ({cancelledApplications.length}명 · 조 배정 제외):{" "}
-            <span style={{ textDecoration: "line-through" }}>
-              {cancelledApplications.map((a) => a.publisher_name).join(", ")}
-            </span>
+            {cancelledApplications.map((a, idx) => (
+              <span key={a.id}>
+                {idx > 0 ? ", " : ""}
+                <span style={{ textDecoration: "line-through" }}>{a.publisher_name}</span>
+                {a.cancel_reason ? `(${a.cancel_reason})` : ""}
+              </span>
+            ))}
           </div>
         )}
       </div>

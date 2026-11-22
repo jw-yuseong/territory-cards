@@ -205,6 +205,7 @@ export interface CartApplication {
   created_at: string;
   is_cancelled?: boolean;
   cancelled_at?: string | null;
+  cancel_reason?: string | null;
 }
 
 
