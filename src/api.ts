@@ -1126,13 +1126,60 @@ export async function deleteCartSchedule(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+const CART_PUB_SYNC_KEY = "jw_cart_pub_sync_v1_72";
+const APPROVED_72_CART_PUBLISHERS = [
+  "강영출", "강은경", "강현화", "곽이연", "권지혜", "김경민", "김광식", "김동근", "김명운", "김미영",
+  "김미자", "김상철", "김영경", "김예원", "김용훈", "김윤건", "김윤미", "김윤서", "김은정", "김진기",
+  "나성숙", "문지혜", "문현숙", "민소원", "박귀숙", "박보람", "박수빈", "박용진", "박유록", "박정자",
+  "박현서", "박희수", "배옥자", "백상기", "백성민", "서미란", "서병순", "손점연", "손필수", "송길순",
+  "송진선", "신은영", "양기수", "양승", "양지애", "여향숙", "예진영", "이경복", "이규연", "이선해",
+  "이영이", "이윤순", "이은비", "이재준", "이채연", "이하나", "이하영", "이향순", "이형재", "이호석",
+  "이화정", "장미선", "전순녀", "정상빈", "조명옥", "채은화", "최광득", "최윤서", "최호운", "켈리타니아",
+  "황덕환", "황아경",
+];
+
+const REMOVED_19_CART_PUBLISHERS = new Set([
+  "강은아", "권순단", "김광택", "노우정", "노화선", "박가원", "박성화", "박시원", "서복순", "서홍범",
+  "오연례", "윤혜자", "이미애", "이영자", "임정은", "정순자", "조명희", "최애리", "최화례",
+]);
+
 export async function fetchCartPublishers(): Promise<CartPublisher[]> {
   const { data, error } = await supabase
     .from("cart_publishers")
     .select("id, name, is_active")
     .eq("is_active", true)
     .order("name");
-  return must(data, error);
+  const rows = must(data, error);
+
+  // 구역관리자 세션에서 이전 91명 초기값 중 제외된 19명이 남아있으면 DB에서도 자동 정리
+  try {
+    const toRemove = rows.filter((r) => REMOVED_19_CART_PUBLISHERS.has(r.name));
+    if (toRemove.length > 0 && typeof localStorage !== "undefined" && localStorage.getItem(CART_PUB_SYNC_KEY) !== "1") {
+      void (async () => {
+        const ids = toRemove.map((r) => r.id);
+        const { error: delErr } = await supabase.from("cart_publishers").delete().in("id", ids);
+        if (!delErr) {
+          localStorage.setItem(CART_PUB_SYNC_KEY, "1");
+        } else {
+          const { error: hideErr } = await supabase
+            .from("cart_publishers")
+            .update({ is_active: false })
+            .in("id", ids);
+          if (!hideErr) localStorage.setItem(CART_PUB_SYNC_KEY, "1");
+        }
+      })();
+    }
+  } catch {
+    // ignore background sync errors
+  }
+
+  // 만약 DB에 아직 초기 91명이 들어있어서 제외된 19명이 포함되어 있다면(정리 전), 화면에서도 즉시 72명만 보이도록 필터링
+  // (단, 관리자가 나중에 직접 추가한 다른 새 이름은 그대로 표시됨)
+  if (rows.length > 72 && rows.some((r) => REMOVED_19_CART_PUBLISHERS.has(r.name))) {
+    const approvedSet = new Set(APPROVED_72_CART_PUBLISHERS);
+    return rows.filter((r) => approvedSet.has(r.name) || !REMOVED_19_CART_PUBLISHERS.has(r.name));
+  }
+  return rows;
 }
 
 export async function addCartPublisher(name: string): Promise<void> {
