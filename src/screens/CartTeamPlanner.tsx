@@ -540,11 +540,19 @@ export default function CartTeamPlanner({
         </button>
       </div>
 
-      {/* 슬롯 클릭 시 신청한 전도인 선택 모달 */}
+      {/* 슬롯 클릭 시 신청한 전도인 선택 모달 (이미 다른 자리에 배정된 전도인은 목록에서 제외) */}
       {pickingSlot && (() => {
         const curDraft = draftByLoc[pickingSlot.locationId];
         const currentSelectedName =
           curDraft?.teams[pickingSlot.teamIdx]?.[pickingSlot.memberIdx] ?? "";
+
+        // 현재 클릭한 슬롯이 아닌 다른 자리에 이미 배정된 전도인은 선택 목록에서 제외
+        const availableApplications = slotApplications.filter((app) => {
+          const name = app.publisher_name.trim();
+          if (name === currentSelectedName.trim()) return true;
+          const assignedPlaces = assignedMap.get(name) ?? [];
+          return assignedPlaces.length === 0;
+        });
 
         return (
           <div className="modal-back" onClick={() => setPickingSlot(null)}>
@@ -553,21 +561,22 @@ export default function CartTeamPlanner({
                 📍 {pickingSlot.locationName} — {pickingSlot.teamIdx + 1}조 ({pickingSlot.memberIdx + 1}번째 전도인)
               </h3>
               <div className="muted" style={{ marginBottom: 10, fontSize: "var(--fs-small)" }}>
-                이 시간대에 전시대를 신청한 전도인 중에서 선택해 주세요.
+                아직 조에 배정되지 않은 신청 전도인 중에서 선택해 주세요.
               </div>
 
               {slotApplications.length === 0 ? (
                 <div className="notice" style={{ marginBottom: 12 }}>
                   이 시간대에 신청한 전도인이 없습니다.
                 </div>
+              ) : availableApplications.length === 0 ? (
+                <div className="notice" style={{ marginBottom: 12 }}>
+                  신청한 모든 전도인이 이미 다른 조에 배정되었습니다.
+                </div>
               ) : (
                 <div className="choice-grid" style={{ maxHeight: 280, overflowY: "auto", marginBottom: 12 }}>
-                  {slotApplications.map((app) => {
+                  {availableApplications.map((app) => {
                     const name = app.publisher_name;
                     const isCurrent = currentSelectedName === name;
-                    const assignedPlaces = assignedMap.get(name) ?? [];
-                    const isAssignedElsewhere =
-                      assignedPlaces.length > 0 && !isCurrent;
 
                     return (
                       <button
@@ -582,16 +591,8 @@ export default function CartTeamPlanner({
                             name
                           )
                         }
-                        style={{
-                          opacity: isAssignedElsewhere ? 0.65 : 1,
-                        }}
                       >
                         <div>{name}</div>
-                        {assignedPlaces.length > 0 && (
-                          <div style={{ fontSize: 11, color: isCurrent ? "#fff" : "var(--c-muted)" }}>
-                            ({assignedPlaces.join(", ")})
-                          </div>
-                        )}
                       </button>
                     );
                   })}
