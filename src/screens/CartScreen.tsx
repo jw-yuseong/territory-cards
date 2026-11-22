@@ -25,24 +25,55 @@ function fmtMonthDay(ymd: string): string {
   return `${Number(m)}월 ${Number(d)}일`;
 }
 
-/** 이번 주(월요일 ~ 일요일)의 시작일(월요일 00:00)과 해당 요일(1~7)의 날짜('YYYY-MM-DD') 계산 */
-function getCurrentWeekDates(now: Date): {
-  mondayYmd: string;
-  sundayYmd: string;
-  dateByDayOfWeek: Record<number, string>;
-} {
+/**
+ * 이번 주가 이미 완료된 전시대는 숨기고 다음 주 전시대를 보여주기 위해,
+ * 각 전시대 일정(schedule)마다 다가오는 날짜('YYYY-MM-DD')를 계산하고 날짜·시간순으로 정렬한다.
+ * - 이번 주 해당 요일의 전시대 종료 시각(end_time)이 현재 시각보다 아직 지나지 않았으면 -> 이번 주 날짜
+ * - 이미 종료 시각이 지났으면(완료됨) -> 다음 주(+7일) 날짜
+ */
+function getUpcomingServiceDate(s: CartSchedule, now: Date): string {
   const jsDay = now.getDay(); // 0=일, 1=월 ... 6=토
   const isoDay = jsDay === 0 ? 7 : jsDay; // 1=월 ... 7=일
   const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (isoDay - 1));
-  const dateByDayOfWeek: Record<number, string> = {};
-  for (let d = 1; d <= 7; d++) {
-    const dt = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + (d - 1));
-    dateByDayOfWeek[d] = fmtYmd(dt);
+  const thisWeekDate = new Date(
+    monday.getFullYear(),
+    monday.getMonth(),
+    monday.getDate() + (s.day_of_week - 1)
+  );
+
+  const [endH, endM] = (s.end_time || s.start_time || "23:59")
+    .split(":")
+    .map((v) => Number(v) || 0);
+  const endDateTime = new Date(
+    thisWeekDate.getFullYear(),
+    thisWeekDate.getMonth(),
+    thisWeekDate.getDate(),
+    endH,
+    endM,
+    0,
+    0
+  );
+
+  if (now.getTime() >= endDateTime.getTime()) {
+    const nextWeekDate = new Date(
+      thisWeekDate.getFullYear(),
+      thisWeekDate.getMonth(),
+      thisWeekDate.getDate() + 7
+    );
+    return fmtYmd(nextWeekDate);
   }
+  return fmtYmd(thisWeekDate);
+}
+
+/** 조회할 신청 내역의 날짜 범위 (이번 주 월요일 ~ 다음 주 일요일, 총 14일) */
+function getTwoWeekQueryRange(now: Date): { startYmd: string; endYmd: string } {
+  const jsDay = now.getDay();
+  const isoDay = jsDay === 0 ? 7 : jsDay;
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (isoDay - 1));
+  const nextSunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 13);
   return {
-    mondayYmd: dateByDayOfWeek[1],
-    sundayYmd: dateByDayOfWeek[7],
-    dateByDayOfWeek,
+    startYmd: fmtYmd(monday),
+    endYmd: fmtYmd(nextSunday),
   };
 }
 
@@ -118,20 +149,39 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
 
   const [now, setNow] = useState<Date>(() => new Date());
 
-  // 30초마다 현재 시각 갱신 (마감 시각 실시간 반영)
+  // 30초마다 현재 시각 갱신 (완료된 일정이 다음 주로 넘어가는 것 & 마감 시각 실시간 반영)
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(timer);
   }, []);
 
-  const weekInfo = useMemo(() => getCurrentWeekDates(now), [now]);
+  const queryRange = useMemo(() => getTwoWeekQueryRange(now), [now]);
+
+  // 각 일정별 다가오는 날짜를 계산하고, 다가오는 날짜 + 시작 시각 순으로 정렬
+  // (예: 수요일에는 이번 주 목요일, 토요일이 먼저 오고, 완료된 화요일은 다음 주 화요일로서 맨 아래에 위치)
+  const upcomingItems = useMemo(() => {
+    return schedules
+      .map((schedule) => ({
+        schedule,
+        serviceDate: getUpcomingServiceDate(schedule, now),
+      }))
+      .sort((a, b) => {
+        if (a.serviceDate !== b.serviceDate) {
+          return a.serviceDate.localeCompare(b.serviceDate);
+        }
+        if (a.schedule.start_time !== b.schedule.start_time) {
+          return a.schedule.start_time.localeCompare(b.schedule.start_time);
+        }
+        return a.schedule.sort_order - b.schedule.sort_order;
+      });
+  }, [schedules, now]);
 
   async function loadAll() {
     try {
       const [sc, ps, apps] = await Promise.all([
         fetchCartSchedules(),
         fetchCartPublishers(),
-        fetchCartApplications(weekInfo.mondayYmd, weekInfo.sundayYmd),
+        fetchCartApplications(queryRange.startYmd, queryRange.endYmd),
       ]);
       setSchedules(sc);
       setPublishers(ps);
@@ -144,7 +194,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
 
   useEffect(() => {
     loadAll();
-  }, [weekInfo.mondayYmd, weekInfo.sundayYmd]);
+  }, [queryRange.startYmd, queryRange.endYmd]);
 
   // 뒤로가기(쓸어넘기기) 시 신청 화면에서 리스트 화면으로 복귀
   useEffect(() => {
@@ -157,9 +207,8 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  function showWindowNoticePopup(s: CartSchedule, win: WindowCheck) {
+  function showWindowNoticePopup(s: CartSchedule, serviceDate: string, win: WindowCheck) {
     const title = formatScheduleFullTitle(s);
-    const serviceDate = weekInfo.dateByDayOfWeek[s.day_of_week];
     setPopupMessage(
       `전시대 신청 및 취소는 그 전날부터 전시대가 시작되기 4시간 전까지만 가능합니다.\n\n` +
         `📌 선택한 일정:\n${fmtMonthDay(serviceDate)} ${title}\n\n` +
@@ -167,11 +216,10 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     );
   }
 
-  function handleSelectSchedule(s: CartSchedule) {
-    const serviceDate = weekInfo.dateByDayOfWeek[s.day_of_week];
+  function handleSelectSchedule(s: CartSchedule, serviceDate: string) {
     const win = checkApplicationWindow(serviceDate, s.start_time, new Date());
     if (!win.allowed) {
-      showWindowNoticePopup(s, win);
+      showWindowNoticePopup(s, serviceDate, win);
       return;
     }
     setError("");
@@ -193,10 +241,10 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
 
   async function handleApply() {
     if (!selectedSchedule || !selectedPubId) return;
-    const serviceDate = weekInfo.dateByDayOfWeek[selectedSchedule.day_of_week];
+    const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
     const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
     if (!win.allowed) {
-      showWindowNoticePopup(selectedSchedule, win);
+      showWindowNoticePopup(selectedSchedule, serviceDate, win);
       return;
     }
 
@@ -208,7 +256,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
       localStorage.setItem("lastCartPublisherId", selectedPubId);
       const pubName = publishers.find((p) => p.id === selectedPubId)?.name ?? "";
       setMsg(`'${pubName}' 전도인 전시대 신청이 완료되었습니다.`);
-      const apps = await fetchCartApplications(weekInfo.mondayYmd, weekInfo.sundayYmd);
+      const apps = await fetchCartApplications(queryRange.startYmd, queryRange.endYmd);
       setApplications(apps);
     } catch (e) {
       setError(friendlyError(e));
@@ -218,10 +266,10 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
 
   async function handleCancel(app: CartApplication) {
     if (!selectedSchedule) return;
-    const serviceDate = weekInfo.dateByDayOfWeek[selectedSchedule.day_of_week];
+    const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
     const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
     if (!win.allowed) {
-      showWindowNoticePopup(selectedSchedule, win);
+      showWindowNoticePopup(selectedSchedule, serviceDate, win);
       return;
     }
     if (!window.confirm(`'${app.publisher_name}' 전도인의 전시대 신청을 취소할까요?`)) return;
@@ -232,7 +280,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     try {
       await cancelCartSlot(app.id);
       setMsg(`'${app.publisher_name}' 전도인의 신청이 취소되었습니다.`);
-      const apps = await fetchCartApplications(weekInfo.mondayYmd, weekInfo.sundayYmd);
+      const apps = await fetchCartApplications(queryRange.startYmd, queryRange.endYmd);
       setApplications(apps);
     } catch (e) {
       setError(friendlyError(e));
@@ -257,7 +305,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     );
   }
 
-  if (loading) return <div className="loading">이번 주 전시대 일정을 불러오는 중...</div>;
+  if (loading) return <div className="loading">전시대 일정을 불러오는 중...</div>;
 
   // 신청 불가 시간 안내 팝업
   const popupModal = popupMessage && (
@@ -279,7 +327,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
 
   // 2) 전시대 신청 화면 (일정을 선택했을 때)
   if (selectedSchedule) {
-    const serviceDate = weekInfo.dateByDayOfWeek[selectedSchedule.day_of_week];
+    const serviceDate = getUpcomingServiceDate(selectedSchedule, now);
     const slotApps = applications.filter(
       (a) => a.schedule_id === selectedSchedule.id && a.service_date === serviceDate
     );
@@ -291,7 +339,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     return (
       <div>
         <button className="btn-line" onClick={closeDetail} style={{ marginBottom: 12 }}>
-          ← 이번 주 전시대 목록으로
+          ← 전시대 목록으로
         </button>
 
         <div className="card-box" style={{ padding: 14, borderColor: "var(--c-primary)" }}>
@@ -438,7 +486,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     );
   }
 
-  // 1) 첫 화면: 이번 주 전시대 리스트
+  // 1) 첫 화면: 다가오는 전시대 리스트 (이미 완료된 일정은 다음 주로 전환하여 표시)
   return (
     <div>
       <div
@@ -450,7 +498,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
         }}
       >
         <h2 className="section-title" style={{ margin: 0 }}>
-          🛒 이번 주 전시대 신청 ({fmtMonthDay(weekInfo.mondayYmd)} ~ {fmtMonthDay(weekInfo.sundayYmd)})
+          🛒 전시대 신청
         </h2>
         {isAdmin && (
           <button
@@ -471,13 +519,12 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
       {error && <div className="error-msg">{error}</div>}
       {msg && <div className="notice">{msg}</div>}
 
-      {schedules.length === 0 ? (
+      {upcomingItems.length === 0 ? (
         <div className="muted" style={{ padding: "16px 0" }}>
           등록된 전시대 일정이 없습니다.
         </div>
       ) : (
-        schedules.map((s) => {
-          const serviceDate = weekInfo.dateByDayOfWeek[s.day_of_week];
+        upcomingItems.map(({ schedule: s, serviceDate }) => {
           const win = checkApplicationWindow(serviceDate, s.start_time, now);
           const slotApps = applications.filter(
             (a) => a.schedule_id === s.id && a.service_date === serviceDate
@@ -485,10 +532,10 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
 
           return (
             <button
-              key={s.id}
+              key={`${s.id}-${serviceDate}`}
               type="button"
               className="card-box"
-              onClick={() => handleSelectSchedule(s)}
+              onClick={() => handleSelectSchedule(s, serviceDate)}
               style={{
                 width: "100%",
                 textAlign: "left",
