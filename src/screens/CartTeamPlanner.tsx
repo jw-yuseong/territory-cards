@@ -94,6 +94,8 @@ export default function CartTeamPlanner({
   locations,
   slotApplications,
   existingPlans,
+  allRecentPlans,
+  threeMonthsAgoYmd,
   onBack,
   onReload,
   onSwitchToApplyView,
@@ -103,6 +105,8 @@ export default function CartTeamPlanner({
   locations: CartLocation[];
   slotApplications: CartApplication[];
   existingPlans: CartTeamPlan[];
+  allRecentPlans: CartTeamPlan[];
+  threeMonthsAgoYmd: string;
   onBack: () => void;
   onReload: () => Promise<void>;
   onSwitchToApplyView: () => void;
@@ -170,6 +174,32 @@ export default function CartTeamPlanner({
     }
     return map;
   }, [locations, draftByLoc]);
+
+  // 최근 3개월 이내에 전시대 조에 배정되어 참여한 횟수 집계 (현재 편성 중인 슬롯 제외 + 현재 화면 배정 반영)
+  const participationCountMap = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const plan of allRecentPlans) {
+      if (plan.service_date < threeMonthsAgoYmd) continue;
+      // 현재 편집 중인 일정·날짜는 화면의 draft 기준으로 더하기 위해 DB 기록에서는 제외
+      if (plan.schedule_id === schedule.id && plan.service_date === serviceDate) continue;
+      const activeTeams = (plan.teams ?? []).slice(0, plan.team_count);
+      for (const members of activeTeams) {
+        if (!Array.isArray(members)) continue;
+        for (const name of members) {
+          const trimmed = (name ?? "").trim();
+          if (!trimmed) continue;
+          counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
+        }
+      }
+    }
+    // 현재 화면에서 배정된 전도인 반영
+    for (const [name, places] of assignedMap.entries()) {
+      if (places.length > 0) {
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [allRecentPlans, threeMonthsAgoYmd, schedule.id, serviceDate, assignedMap]);
 
   function setLocationMode(locationId: string, mode: "off" | 2 | 3 | 4) {
     setDraftByLoc((prev) => {
@@ -323,7 +353,7 @@ export default function CartTeamPlanner({
         </div>
       </div>
 
-      {/* 이 시간대 신청한 전도인 현황 (배정 여부 표시) */}
+      {/* 이 시간대 신청한 전도인 현황 (배정 여부 및 최근 3개월 참여 횟수 표시) */}
       <div className="card-box" style={{ padding: 12 }}>
         <div
           style={{
@@ -333,7 +363,7 @@ export default function CartTeamPlanner({
             marginBottom: 8,
           }}
         >
-          신청한 전도인 ({slotApplications.length}명) — 초록색은 조 배정 완료
+          신청한 전도인 ({slotApplications.length}명) — 이름 옆은 최근 3개월 참여 횟수
         </div>
         {slotApplications.length === 0 ? (
           <div className="muted" style={{ fontSize: "var(--fs-small)" }}>
@@ -344,6 +374,7 @@ export default function CartTeamPlanner({
             {slotApplications.map((app) => {
               const assignedPlaces = assignedMap.get(app.publisher_name);
               const isAssigned = assignedPlaces && assignedPlaces.length > 0;
+              const cnt = participationCountMap.get(app.publisher_name.trim()) ?? 0;
               return (
                 <span
                   key={app.id}
@@ -362,9 +393,12 @@ export default function CartTeamPlanner({
                 >
                   {isAssigned ? "✓ " : ""}
                   {app.publisher_name}
+                  <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.85 }}>
+                    ({cnt}회)
+                  </span>
                   {isAssigned && (
                     <span style={{ fontSize: 11, opacity: 0.85 }}>
-                      ({assignedPlaces.join(", ")})
+                      · {assignedPlaces.join(", ")}
                     </span>
                   )}
                 </span>
@@ -492,7 +526,9 @@ export default function CartTeamPlanner({
 
                       <div className="row" style={{ gap: 8 }}>
                         {members.map((memberName, memberIdx) => {
-                          const filled = memberName.trim() !== "";
+                          const trimmedName = memberName.trim();
+                          const filled = trimmedName !== "";
+                          const cnt = filled ? (participationCountMap.get(trimmedName) ?? 0) : 0;
                           return (
                             <button
                               key={memberIdx}
@@ -516,7 +552,16 @@ export default function CartTeamPlanner({
                                 padding: "10px 6px",
                               }}
                             >
-                              {filled ? memberName : `+ 전도인 ${memberIdx + 1}`}
+                              {filled ? (
+                                <>
+                                  {trimmedName}
+                                  <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 3 }}>
+                                    ({cnt}회)
+                                  </span>
+                                </>
+                              ) : (
+                                `+ 전도인 ${memberIdx + 1}`
+                              )}
                             </button>
                           );
                         })}
@@ -561,7 +606,7 @@ export default function CartTeamPlanner({
                 📍 {pickingSlot.locationName} — {pickingSlot.teamIdx + 1}조 ({pickingSlot.memberIdx + 1}번째 전도인)
               </h3>
               <div className="muted" style={{ marginBottom: 10, fontSize: "var(--fs-small)" }}>
-                아직 조에 배정되지 않은 신청 전도인 중에서 선택해 주세요.
+                아직 조에 배정되지 않은 신청 전도인 중에서 선택해 주세요. (괄호는 최근 3개월 참여 횟수)
               </div>
 
               {slotApplications.length === 0 ? (
@@ -577,6 +622,7 @@ export default function CartTeamPlanner({
                   {availableApplications.map((app) => {
                     const name = app.publisher_name;
                     const isCurrent = currentSelectedName === name;
+                    const cnt = participationCountMap.get(name.trim()) ?? 0;
 
                     return (
                       <button
@@ -592,7 +638,19 @@ export default function CartTeamPlanner({
                           )
                         }
                       >
-                        <div>{name}</div>
+                        <div>
+                          {name}
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 400,
+                              marginLeft: 3,
+                              color: isCurrent ? "#fff" : "var(--c-muted)",
+                            }}
+                          >
+                            ({cnt}회)
+                          </span>
+                        </div>
                       </button>
                     );
                   })}

@@ -72,12 +72,13 @@ function getUpcomingServiceDate(s: CartSchedule, now: Date): string {
   return fmtYmd(thisWeekDate);
 }
 
-/** 조회할 신청 내역의 날짜 범위 (이번 주 월요일 ~ 다음 주 일요일, 총 14일) 및 오늘 기준 일주일 표시 범위 */
+/** 조회할 신청 내역의 날짜 범위 (이번 주 월요일 ~ 다음 주 일요일) 및 최근 3개월 조 배정 기록 조회 범위 */
 function getTwoWeekQueryRange(now: Date): {
   startYmd: string;
   endYmd: string;
   todayYmd: string;
   weekEndYmd: string;
+  threeMonthsAgoYmd: string;
 } {
   const jsDay = now.getDay();
   const isoDay = jsDay === 0 ? 7 : jsDay;
@@ -85,11 +86,13 @@ function getTwoWeekQueryRange(now: Date): {
   const nextSunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 13);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const weekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 6);
+  const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
   return {
     startYmd: fmtYmd(monday),
     endYmd: fmtYmd(nextSunday),
     todayYmd: fmtYmd(today),
     weekEndYmd: fmtYmd(weekEnd),
+    threeMonthsAgoYmd: fmtYmd(threeMonthsAgo),
   };
 }
 
@@ -209,7 +212,7 @@ export default function CartScreen({
         fetchCartLocations(),
         fetchCartPublishers(),
         fetchCartApplications(queryRange.startYmd, queryRange.endYmd),
-        fetchCartTeamPlans(queryRange.startYmd, queryRange.endYmd),
+        fetchCartTeamPlans(queryRange.threeMonthsAgoYmd, queryRange.endYmd),
       ]);
       setSchedules(sc);
       setLocations(locs);
@@ -224,7 +227,25 @@ export default function CartScreen({
 
   useEffect(() => {
     loadAll();
-  }, [queryRange.startYmd, queryRange.endYmd]);
+  }, [queryRange.threeMonthsAgoYmd, queryRange.startYmd, queryRange.endYmd]);
+
+  /** 최근 3개월 이내에 전시대 조에 배정되어 참여한 전도인별 횟수 집계 */
+  const threeMonthParticipationCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const plan of teamPlans) {
+      if (plan.service_date < queryRange.threeMonthsAgoYmd) continue;
+      const activeTeams = (plan.teams ?? []).slice(0, plan.team_count);
+      for (const members of activeTeams) {
+        if (!Array.isArray(members)) continue;
+        for (const name of members) {
+          const trimmed = (name ?? "").trim();
+          if (!trimmed) continue;
+          counts.set(trimmed, (counts.get(trimmed) ?? 0) + 1);
+        }
+      }
+    }
+    return counts;
+  }, [teamPlans, queryRange.threeMonthsAgoYmd]);
 
   // 뒤로가기(쓸어넘기기) 시 상세 화면에서 리스트 화면으로 복귀
   useEffect(() => {
@@ -427,6 +448,8 @@ export default function CartScreen({
           locations={locations}
           slotApplications={slotApps}
           existingPlans={slotPlans}
+          allRecentPlans={teamPlans}
+          threeMonthsAgoYmd={queryRange.threeMonthsAgoYmd}
           onBack={closeDetail}
           onReload={loadAll}
           onSwitchToApplyView={() => setDetailMode("apply")}
@@ -538,42 +561,52 @@ export default function CartScreen({
             </div>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {slotApps.map((a) => (
-                <span
-                  key={a.id}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "4px 10px",
-                    borderRadius: 999,
-                    background: "#eff6ff",
-                    border: "1px solid #bfdbfe",
-                    fontSize: "var(--fs-small)",
-                    fontWeight: 600,
-                    color: "#1e40af",
-                  }}
-                >
-                  {a.publisher_name}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => handleCancel(a)}
+              {slotApps.map((a) => {
+                const cnt = threeMonthParticipationCounts.get(a.publisher_name.trim()) ?? 0;
+                return (
+                  <span
+                    key={a.id}
                     style={{
-                      minHeight: 0,
-                      padding: "1px 6px",
-                      fontSize: 12,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "4px 10px",
                       borderRadius: 999,
-                      border: "1px solid #fca5a5",
-                      background: "#fef2f2",
-                      color: "#b91c1c",
-                      fontWeight: 700,
+                      background: "#eff6ff",
+                      border: "1px solid #bfdbfe",
+                      fontSize: "var(--fs-small)",
+                      fontWeight: 600,
+                      color: "#1e40af",
                     }}
                   >
-                    취소
-                  </button>
-                </span>
-              ))}
+                    <span>
+                      {a.publisher_name}
+                      {canPlanTeams && (
+                        <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 3, opacity: 0.85 }}>
+                          ({cnt}회)
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleCancel(a)}
+                      style={{
+                        minHeight: 0,
+                        padding: "1px 6px",
+                        fontSize: 12,
+                        borderRadius: 999,
+                        border: "1px solid #fca5a5",
+                        background: "#fef2f2",
+                        color: "#b91c1c",
+                        fontWeight: 700,
+                      }}
+                    >
+                      취소
+                    </button>
+                  </span>
+                );
+              })}
             </div>
           )}
         </div>
@@ -607,6 +640,7 @@ export default function CartScreen({
               filteredPublishers.map((p) => {
                 const isApplied = appliedPubIds.has(p.id);
                 const isSelected = selectedPubId === p.id;
+                const cnt = threeMonthParticipationCounts.get(p.name.trim()) ?? 0;
                 return (
                   <button
                     key={p.id}
@@ -615,6 +649,18 @@ export default function CartScreen({
                     onClick={() => setSelectedPubId(p.id)}
                   >
                     {p.name}
+                    {canPlanTeams && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 400,
+                          marginLeft: 3,
+                          color: isSelected ? "#fff" : "var(--c-muted)",
+                        }}
+                      >
+                        ({cnt}회)
+                      </span>
+                    )}
                     {isApplied ? " (신청됨)" : ""}
                   </button>
                 );
@@ -783,9 +829,34 @@ export default function CartScreen({
                     fontWeight: slotApps.length > 0 ? 600 : 400,
                   }}
                 >
-                  {slotApps.length > 0
-                    ? `신청자 (${slotApps.length}명): ${slotApps.map((a) => a.publisher_name).join(", ")}`
-                    : "신청자 없음"}
+                  {slotApps.length > 0 ? (
+                    <>
+                      신청자 ({slotApps.length}명):{" "}
+                      {slotApps.map((a, idx) => {
+                        const cnt = threeMonthParticipationCounts.get(a.publisher_name.trim()) ?? 0;
+                        return (
+                          <span key={a.id}>
+                            {idx > 0 ? ", " : ""}
+                            {a.publisher_name}
+                            {canPlanTeams && (
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 400,
+                                  color: "var(--c-muted)",
+                                  marginLeft: 2,
+                                }}
+                              >
+                                ({cnt}회)
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </>
+                  ) : (
+                    "신청자 없음"
+                  )}
                 </div>
               </div>
 
