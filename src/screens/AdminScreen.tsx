@@ -319,7 +319,7 @@ export default function AdminScreen() {
         style={{ width: "100%", marginBottom: 10 }}
         onClick={() => setShowCartAdmin(true)}
       >
-        🛒 전시대 관리 (요일·시간표 및 승인 명단)
+        🛒 전시대 관리 (요일·시간표, 장소 및 승인 명단)
       </button>
       <button
         className="btn-line"

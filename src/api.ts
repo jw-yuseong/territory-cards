@@ -1268,3 +1268,109 @@ export async function cancelCartSlot(applicationId: string): Promise<void> {
   const { error } = await supabase.from("cart_applications").delete().eq("id", applicationId);
   if (error) throw new Error(error.message);
 }
+
+
+// ---- 전시대 장소 (CartLocation) & 조 편성 (CartTeamPlan) ----
+
+import type { CartLocation, CartTeamPlan } from "./types";
+
+const DEFAULT_CART_LOCATIONS: CartLocation[] = [
+  { id: "default-loc-1", name: "노은역 광장", sort_order: 1, is_active: true },
+  { id: "default-loc-2", name: "에스컬레이터", sort_order: 2, is_active: true },
+  { id: "default-loc-3", name: "코끼리 약국", sort_order: 3, is_active: true },
+];
+
+export async function fetchCartLocations(): Promise<CartLocation[]> {
+  const { data, error } = await supabase
+    .from("cart_locations")
+    .select("id, name, sort_order, is_active")
+    .eq("is_active", true)
+    .order("sort_order")
+    .order("created_at");
+  if (error) {
+    // patch20 SQL 적용 전에도 기본 3곳이 보이도록 폴백
+    console.warn("fetchCartLocations failed, returning defaults:", error);
+    return DEFAULT_CART_LOCATIONS;
+  }
+  const rows = (data ?? []) as CartLocation[];
+  if (rows.length === 0) return DEFAULT_CART_LOCATIONS;
+  return rows;
+}
+
+export async function addCartLocation(name: string, sortOrder: number): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("장소 이름을 입력해 주세요.");
+  const { error } = await supabase.from("cart_locations").insert({
+    name: trimmed,
+    sort_order: sortOrder,
+    is_active: true,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function updateCartLocation(id: string, name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("장소 이름을 입력해 주세요.");
+  const { error } = await supabase
+    .from("cart_locations")
+    .update({ name: trimmed })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteCartLocation(id: string): Promise<void> {
+  const { error } = await supabase.from("cart_locations").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchCartTeamPlans(
+  startDate: string,
+  endDate: string
+): Promise<CartTeamPlan[]> {
+  const { data, error } = await supabase
+    .from("cart_team_plans")
+    .select("id, schedule_id, service_date, location_id, team_count, teams, updated_at")
+    .gte("service_date", startDate)
+    .lte("service_date", endDate);
+  if (error) {
+    console.warn("fetchCartTeamPlans failed (patch20 may not be applied yet):", error);
+    return [];
+  }
+  return ((data ?? []) as CartTeamPlan[]).map((row) => ({
+    ...row,
+    teams: Array.isArray(row.teams) ? row.teams : [],
+  }));
+}
+
+export async function upsertCartTeamPlan(input: {
+  schedule_id: string;
+  service_date: string;
+  location_id: string;
+  team_count: number;
+  teams: string[][];
+}): Promise<void> {
+  const { error } = await supabase.from("cart_team_plans").upsert(
+    {
+      schedule_id: input.schedule_id,
+      service_date: input.service_date,
+      location_id: input.location_id,
+      team_count: input.team_count,
+      teams: input.teams,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "schedule_id,service_date,location_id" }
+  );
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteCartTeamPlan(
+  scheduleId: string,
+  serviceDate: string,
+  locationId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("cart_team_plans")
+    .delete()
+    .match({ schedule_id: scheduleId, service_date: serviceDate, location_id: locationId });
+  if (error) throw new Error(error.message);
+}

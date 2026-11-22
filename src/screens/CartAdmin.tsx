@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  addCartLocation,
   addCartPublisher,
   addCartSchedule,
+  deleteCartLocation,
   deleteCartSchedule,
+  fetchCartLocations,
   fetchCartPublishers,
   fetchCartSchedules,
   removeCartPublisher,
+  updateCartLocation,
   updateCartSchedule,
 } from "../api";
-import type { CartPublisher, CartSchedule } from "../types";
+import type { CartLocation, CartPublisher, CartSchedule } from "../types";
 import { friendlyError } from "../errors";
 import { matchName } from "../chosung";
 
@@ -55,6 +59,7 @@ const HOUR_OPTIONS = Array.from({ length: 24 }, (_, h) => {
 
 export default function CartAdmin({ onBack }: { onBack?: () => void }) {
   const [schedules, setSchedules] = useState<CartSchedule[]>([]);
+  const [locations, setLocations] = useState<CartLocation[]>([]);
   const [publishers, setPublishers] = useState<CartPublisher[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -70,14 +75,24 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
   const [timeLabel, setTimeLabel] = useState<string>("오후 6시~8시");
   const [meetingNote, setMeetingNote] = useState<string>("봉사모임 5시45분");
 
+  // 전시대 장소(최대 3곳) 수정/추가 상태
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [editingLocationName, setEditingLocationName] = useState<string>("");
+  const [newLocationName, setNewLocationName] = useState<string>("");
+
   // 승인 전도인 추가 및 검색 상태
   const [newPubName, setNewPubName] = useState("");
   const [searchPub, setSearchPub] = useState("");
 
   async function reload() {
     try {
-      const [sc, ps] = await Promise.all([fetchCartSchedules(), fetchCartPublishers()]);
+      const [sc, locs, ps] = await Promise.all([
+        fetchCartSchedules(),
+        fetchCartLocations(),
+        fetchCartPublishers(),
+      ]);
       setSchedules(sc);
+      setLocations(locs);
       setPublishers(ps);
     } catch (e) {
       setError(friendlyError(e));
@@ -169,6 +184,64 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     setBusy(false);
   }
 
+  async function handleSaveLocationName(loc: CartLocation) {
+    const trimmed = editingLocationName.trim();
+    if (!trimmed) {
+      setError("장소 이름을 입력해 주세요.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await updateCartLocation(loc.id, trimmed);
+      setEditingLocationId(null);
+      setEditingLocationName("");
+      setMsg(`전시대 장소 이름이 '${trimmed}'(으)로 변경되었습니다.`);
+      await reload();
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  async function handleAddLocation() {
+    const trimmed = newLocationName.trim();
+    if (!trimmed) return;
+    if (locations.length >= 3) {
+      setError("전시대 장소는 최대 3곳까지만 등록할 수 있습니다.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      const maxSort = locations.reduce((m, l) => Math.max(m, l.sort_order), 0);
+      await addCartLocation(trimmed, maxSort + 1);
+      setNewLocationName("");
+      setMsg(`전시대 장소 '${trimmed}' 추가됨`);
+      await reload();
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  async function handleDeleteLocation(loc: CartLocation) {
+    if (!window.confirm(`전시대 장소 '${loc.name}'을(를) 삭제할까요?`)) return;
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await deleteCartLocation(loc.id);
+      setMsg(`전시대 장소 '${loc.name}'이(가) 삭제되었습니다.`);
+      await reload();
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
   async function handleAddPublisher() {
     const name = newPubName.trim();
     if (!name) return;
@@ -221,10 +294,10 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
         </button>
       )}
       <h2 className="section-title" style={{ marginTop: 4 }}>
-        🛒 전시대 관리 (요일·시간표 및 승인 명단)
+        🛒 전시대 관리 (요일·시간표, 장소 및 승인 명단)
       </h2>
       <div className="notice">
-        <b>전시대 요일·시간표</b>와 <b>전시대 봉사에 승인된 전도인 명단</b>을 추가, 변경, 삭제할 수 있습니다.
+        <b>전시대 요일·시간표</b>, <b>전시대 장소(최대 3곳)</b>, <b>전시대 승인 전도인 명단</b>을 추가, 변경, 삭제할 수 있습니다.
       </div>
 
       {error && <div className="error-msg">{error}</div>}
@@ -389,7 +462,117 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
         </div>
       )}
 
-      {/* 2. 전시대 승인 전도인 명단 관리 */}
+      {/* 2. 전시대 장소 관리 (최대 3곳) */}
+      <div className="section-title" style={{ marginTop: 28 }}>
+        📍 전시대 장소 관리 ({locations.length} / 최대 3곳)
+      </div>
+      <div className="muted" style={{ marginBottom: 8, fontSize: "var(--fs-small)" }}>
+        인도자가 전시대 조를 편성할 때 사용하는 장소입니다. 장소 이름을 변경하거나 삭제·추가(최대 3곳)할 수 있습니다.
+      </div>
+
+      {locations.map((loc, idx) => {
+        const isEditing = editingLocationId === loc.id;
+        return (
+          <div key={loc.id} className="card-box" style={{ padding: 12 }}>
+            {isEditing ? (
+              <div>
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label>장소 {idx + 1} 이름 수정</label>
+                  <input
+                    type="text"
+                    value={editingLocationName}
+                    onChange={(e) => setEditingLocationName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSaveLocationName(loc)}
+                    autoFocus
+                  />
+                </div>
+                <div className="row">
+                  <button
+                    className="btn-primary"
+                    style={{ flex: 1 }}
+                    disabled={busy || !editingLocationName.trim()}
+                    onClick={() => handleSaveLocationName(loc)}
+                  >
+                    저장
+                  </button>
+                  <button
+                    className="btn-line"
+                    style={{ flex: 1 }}
+                    disabled={busy}
+                    onClick={() => {
+                      setEditingLocationId(null);
+                      setEditingLocationName("");
+                    }}
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                }}
+              >
+                <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>
+                  📍 {idx + 1}. {loc.name}
+                </span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button
+                    className="btn-line"
+                    style={{ padding: "6px 12px", minHeight: 0 }}
+                    disabled={busy}
+                    onClick={() => {
+                      setEditingLocationId(loc.id);
+                      setEditingLocationName(loc.name);
+                    }}
+                  >
+                    이름 변경
+                  </button>
+                  <button
+                    className="btn-line"
+                    style={{
+                      padding: "6px 12px",
+                      minHeight: 0,
+                      color: "var(--c-danger)",
+                      borderColor: "var(--c-danger)",
+                    }}
+                    disabled={busy}
+                    onClick={() => handleDeleteLocation(loc)}
+                  >
+                    삭제
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {locations.length < 3 && (
+        <div className="row" style={{ marginTop: 8 }}>
+          <input
+            type="text"
+            value={newLocationName}
+            onChange={(e) => setNewLocationName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAddLocation()}
+            placeholder="새 전시대 장소 이름 입력 (최대 3곳)"
+          />
+          <button
+            className="btn-primary"
+            style={{ width: "auto", flexShrink: 0 }}
+            disabled={busy || !newLocationName.trim()}
+            onClick={handleAddLocation}
+          >
+            장소 추가
+          </button>
+        </div>
+      )}
+
+      {/* 3. 전시대 승인 전도인 명단 관리 */}
       <div className="section-title" style={{ marginTop: 28 }}>
         👥 전시대 봉사 승인 전도인 ({publishers.length}명)
       </div>

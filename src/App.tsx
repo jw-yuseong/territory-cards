@@ -125,7 +125,9 @@ export default function App() {
             {tab === "publisher" && <PublisherScreen />}
             {tab === "conductor" && showConductor && <ConductorScreen isAdmin={showAdmin} />}
             {tab === "admin" && showAdmin && <AdminScreen />}
-            {tab === "cart" && showAdmin && <CartScreen isAdmin={showAdmin} />}
+            {tab === "cart" && showConductor && (
+              <CartScreen isAdmin={showAdmin} isConductor={showConductor} />
+            )}
           </>
         )}
       </main>
@@ -146,7 +148,7 @@ export default function App() {
               인도자
             </button>
           )}
-          {showAdmin && (
+          {showConductor && (
             <button
               className={tab === "cart" ? "active" : ""}
               onClick={() => setTab("cart")}

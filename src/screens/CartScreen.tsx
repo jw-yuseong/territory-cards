@@ -3,13 +3,22 @@ import {
   applyCartSlot,
   cancelCartSlot,
   fetchCartApplications,
+  fetchCartLocations,
   fetchCartPublishers,
   fetchCartSchedules,
+  fetchCartTeamPlans,
 } from "../api";
-import type { CartApplication, CartPublisher, CartSchedule } from "../types";
+import type {
+  CartApplication,
+  CartLocation,
+  CartPublisher,
+  CartSchedule,
+  CartTeamPlan,
+} from "../types";
 import { friendlyError } from "../errors";
 import { matchName } from "../chosung";
 import CartAdmin, { DAY_NAMES, formatScheduleFullTitle } from "./CartAdmin";
+import CartTeamPlanner, { buildTeamSummaryText } from "./CartTeamPlanner";
 
 /** Date -> 'YYYY-MM-DD' */
 function fmtYmd(d: Date): string {
@@ -28,8 +37,6 @@ function fmtMonthDay(ymd: string): string {
 /**
  * 이번 주가 이미 완료된 전시대는 숨기고 다음 주 전시대를 보여주기 위해,
  * 각 전시대 일정(schedule)마다 다가오는 날짜('YYYY-MM-DD')를 계산하고 날짜·시간순으로 정렬한다.
- * - 이번 주 해당 요일의 전시대 종료 시각(end_time)이 현재 시각보다 아직 지나지 않았으면 -> 이번 주 날짜
- * - 이미 종료 시각이 지났으면(완료됨) -> 다음 주(+7일) 날짜
  */
 function getUpcomingServiceDate(s: CartSchedule, now: Date): string {
   const jsDay = now.getDay(); // 0=일, 1=월 ... 6=토
@@ -133,17 +140,28 @@ function checkApplicationWindow(
   return { allowed: true, status: "open", openAtStr, closeAtStr };
 }
 
-export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
+export default function CartScreen({
+  isAdmin = false,
+  isConductor = false,
+}: {
+  isAdmin?: boolean;
+  isConductor?: boolean;
+}) {
+  const canPlanTeams = isConductor || isAdmin;
+
   const [schedules, setSchedules] = useState<CartSchedule[]>([]);
+  const [locations, setLocations] = useState<CartLocation[]>([]);
   const [publishers, setPublishers] = useState<CartPublisher[]>([]);
   const [applications, setApplications] = useState<CartApplication[]>([]);
+  const [teamPlans, setTeamPlans] = useState<CartTeamPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
 
-  // 선택한 전시대 일정 (신청 화면 진입)
+  // 선택한 전시대 일정 및 화면 모드 ('plan' = 인도자 조 편성, 'apply' = 전도인 신청)
   const [selectedSchedule, setSelectedSchedule] = useState<CartSchedule | null>(null);
+  const [detailMode, setDetailMode] = useState<"plan" | "apply">("apply");
   // 구역관리자일 때 전시대 설정 화면으로 전환
   const [showAdminConfig, setShowAdminConfig] = useState(false);
 
@@ -158,7 +176,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
 
   const [now, setNow] = useState<Date>(() => new Date());
 
-  // 30초마다 현재 시각 갱신 (완료된 일정이 다음 주로 넘어가는 것 & 마감 시각 실시간 반영)
+  // 30초마다 현재 시각 갱신
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(timer);
@@ -167,7 +185,6 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
   const queryRange = useMemo(() => getTwoWeekQueryRange(now), [now]);
 
   // 각 일정별 다가오는 날짜를 계산하고, 다가오는 날짜 + 시작 시각 순으로 정렬
-  // (예: 수요일에는 이번 주 목요일, 토요일이 먼저 오고, 완료된 화요일은 다음 주 화요일로서 맨 아래에 위치)
   const upcomingItems = useMemo(() => {
     return schedules
       .map((schedule) => ({
@@ -187,14 +204,18 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
 
   async function loadAll() {
     try {
-      const [sc, ps, apps] = await Promise.all([
+      const [sc, locs, ps, apps, plans] = await Promise.all([
         fetchCartSchedules(),
+        fetchCartLocations(),
         fetchCartPublishers(),
         fetchCartApplications(queryRange.startYmd, queryRange.endYmd),
+        fetchCartTeamPlans(queryRange.startYmd, queryRange.endYmd),
       ]);
       setSchedules(sc);
+      setLocations(locs);
       setPublishers(ps);
       setApplications(apps);
+      setTeamPlans(plans);
     } catch (e) {
       setError(friendlyError(e));
     }
@@ -205,7 +226,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     loadAll();
   }, [queryRange.startYmd, queryRange.endYmd]);
 
-  // 뒤로가기(쓸어넘기기) 시 신청 화면에서 리스트 화면으로 복귀
+  // 뒤로가기(쓸어넘기기) 시 상세 화면에서 리스트 화면으로 복귀
   useEffect(() => {
     function onPop() {
       setSelectedSchedule(null);
@@ -226,6 +247,17 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
   }
 
   function handleSelectSchedule(s: CartSchedule, serviceDate: string) {
+    // 봉사인도자 또는 구역관리자는 신청 시간 여부와 관계없이 곧바로 전시대 조 계획 화면으로 진입
+    if (canPlanTeams) {
+      setError("");
+      setMsg("");
+      setSearchPub("");
+      setDetailMode("plan");
+      setSelectedSchedule(s);
+      window.history.pushState({ cartDetail: true }, "");
+      return;
+    }
+
     const win = checkApplicationWindow(serviceDate, s.start_time, new Date());
     if (!win.allowed) {
       showWindowNoticePopup(s, serviceDate, win);
@@ -234,6 +266,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     setError("");
     setMsg("");
     setSearchPub("");
+    setDetailMode("apply");
     setSelectedSchedule(s);
     window.history.pushState({ cartDetail: true }, "");
   }
@@ -251,10 +284,12 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
   async function handleApply() {
     if (!selectedSchedule || !selectedPubId) return;
     const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
-    const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
-    if (!win.allowed) {
-      showWindowNoticePopup(selectedSchedule, serviceDate, win);
-      return;
+    if (!canPlanTeams) {
+      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
+      if (!win.allowed) {
+        showWindowNoticePopup(selectedSchedule, serviceDate, win);
+        return;
+      }
     }
 
     setBusy(true);
@@ -276,10 +311,12 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
   async function handleCancel(app: CartApplication) {
     if (!selectedSchedule) return;
     const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
-    const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
-    if (!win.allowed) {
-      showWindowNoticePopup(selectedSchedule, serviceDate, win);
-      return;
+    if (!canPlanTeams) {
+      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
+      if (!win.allowed) {
+        showWindowNoticePopup(selectedSchedule, serviceDate, win);
+        return;
+      }
     }
     if (!window.confirm(`'${app.publisher_name}' 전도인의 전시대 신청을 취소할까요?`)) return;
 
@@ -302,6 +339,44 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     if (!q) return publishers;
     return publishers.filter((p) => matchName(p.name, q));
   }, [publishers, searchPub]);
+
+  /** 특정 일정에 편성된 장소별 조 요약 배열 생성 */
+  function getFormattedPlansForSlot(scheduleId: string, serviceDate: string) {
+    const list: { locName: string; teamCount: number; teamLines: string[] }[] = [];
+    for (const loc of locations) {
+      const plan = teamPlans.find(
+        (p) =>
+          p.schedule_id === scheduleId &&
+          p.service_date === serviceDate &&
+          p.location_id === loc.id
+      );
+      if (!plan) continue;
+      const lines: string[] = [];
+      (plan.teams ?? []).slice(0, plan.team_count).forEach((members, idx) => {
+        const valid = members.map((m) => m.trim()).filter(Boolean);
+        if (valid.length > 0) {
+          lines.push(`${idx + 1}조: ${valid.join(", ")}`);
+        }
+      });
+      if (lines.length > 0) {
+        list.push({ locName: loc.name, teamCount: plan.team_count, teamLines: lines });
+      }
+    }
+    return list;
+  }
+
+  async function copySlotTeamSummary(s: CartSchedule, serviceDate: string) {
+    const slotPlans = teamPlans.filter(
+      (p) => p.schedule_id === s.id && p.service_date === serviceDate
+    );
+    const text = buildTeamSummaryText(s, serviceDate, locations, slotPlans);
+    try {
+      await navigator.clipboard.writeText(text);
+      setMsg("📋 조 편성 내역이 복사되었습니다. 카카오톡 등에 붙여넣기 하세요.");
+    } catch {
+      window.prompt("아래 조 편성 내용을 복사하세요:", text);
+    }
+  }
 
   if (showAdminConfig) {
     return (
@@ -334,22 +409,61 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
     </div>
   );
 
-  // 2) 전시대 신청 화면 (일정을 선택했을 때)
+  // 2) 일정을 선택했을 때: 인도자 조 편성 화면('plan') 또는 전시대 신청 화면('apply')
   if (selectedSchedule) {
     const serviceDate = getUpcomingServiceDate(selectedSchedule, now);
     const slotApps = applications.filter(
       (a) => a.schedule_id === selectedSchedule.id && a.service_date === serviceDate
     );
+    const slotPlans = teamPlans.filter(
+      (p) => p.schedule_id === selectedSchedule.id && p.service_date === serviceDate
+    );
+
+    if (canPlanTeams && detailMode === "plan") {
+      return (
+        <CartTeamPlanner
+          schedule={selectedSchedule}
+          serviceDate={serviceDate}
+          locations={locations}
+          slotApplications={slotApps}
+          existingPlans={slotPlans}
+          onBack={closeDetail}
+          onReload={loadAll}
+          onSwitchToApplyView={() => setDetailMode("apply")}
+        />
+      );
+    }
+
     const appliedPubIds = new Set(slotApps.map((a) => a.publisher_id));
     const selectedPub = publishers.find((p) => p.id === selectedPubId);
     const alreadyAppliedApp = slotApps.find((a) => a.publisher_id === selectedPubId);
     const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, now);
+    const formattedPlans = getFormattedPlansForSlot(selectedSchedule.id, serviceDate);
 
     return (
       <div>
-        <button className="btn-line" onClick={closeDetail} style={{ marginBottom: 12 }}>
-          ← 전시대 목록으로
-        </button>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
+          <button className="btn-line" onClick={closeDetail}>
+            ← 전시대 목록으로
+          </button>
+          {canPlanTeams && (
+            <button
+              className="btn-line"
+              style={{ fontSize: "var(--fs-small)", padding: "6px 12px" }}
+              onClick={() => setDetailMode("plan")}
+            >
+              📋 조 편성 화면으로
+            </button>
+          )}
+        </div>
 
         <div className="card-box" style={{ padding: 14, borderColor: "var(--c-primary)" }}>
           <div className="muted" style={{ fontSize: "var(--fs-small)", marginBottom: 2 }}>
@@ -362,6 +476,49 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
             신청·취소 마감: {win.closeAtStr}까지 (시작 4시간 전)
           </div>
         </div>
+
+        {/* 편성된 조 현황이 있으면 신청 화면 상단에도 표시 */}
+        {formattedPlans.length > 0 && (
+          <div
+            className="card-box"
+            style={{
+              padding: 12,
+              background: "#f0fdf4",
+              borderColor: "#86efac",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 6,
+              }}
+            >
+              <span style={{ fontWeight: 700, fontSize: "var(--fs-small)", color: "#166534" }}>
+                📍 편성된 전시대 조 현황
+              </span>
+              <button
+                type="button"
+                className="btn-line"
+                style={{ minHeight: 0, padding: "2px 8px", fontSize: 12 }}
+                onClick={() => copySlotTeamSummary(selectedSchedule, serviceDate)}
+              >
+                📋 복사
+              </button>
+            </div>
+            {formattedPlans.map((fp, i) => (
+              <div key={i} style={{ fontSize: "var(--fs-small)", marginTop: i > 0 ? 6 : 0 }}>
+                <div style={{ fontWeight: 700, color: "#15803d" }}>
+                  • {fp.locName} ({fp.teamCount}조)
+                </div>
+                <div style={{ paddingLeft: 10, color: "#166534" }}>
+                  {fp.teamLines.join(" / ")}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 이미 신청한 사람들 이름 (작게 표시 + 취소 가능) */}
         <div className="card-box" style={{ padding: 12 }}>
@@ -521,8 +678,16 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
       </div>
 
       <div className="notice">
-        전시대 신청 및 취소는 <b>그 전날(오전 0시)부터 전시대 시작 4시간 전까지</b> 가능합니다.
-        신청할 시간대를 눌러 주세요.
+        {canPlanTeams ? (
+          <>
+            인도자 화면입니다. 일정을 선택하면 <b>장소별(최대 3곳) 전시대 조를 계획·편성</b>할 수 있습니다.
+          </>
+        ) : (
+          <>
+            전시대 신청 및 취소는 <b>그 전날(오전 0시)부터 전시대 시작 4시간 전까지</b> 가능합니다.
+            신청할 시간대를 눌러 주세요.
+          </>
+        )}
       </div>
 
       {error && <div className="error-msg">{error}</div>}
@@ -538,82 +703,136 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
           const slotApps = applications.filter(
             (a) => a.schedule_id === s.id && a.service_date === serviceDate
           );
+          const formattedPlans = getFormattedPlansForSlot(s.id, serviceDate);
 
           return (
-            <button
+            <div
               key={`${s.id}-${serviceDate}`}
-              type="button"
               className="card-box"
-              onClick={() => handleSelectSchedule(s, serviceDate)}
               style={{
-                width: "100%",
-                textAlign: "left",
                 padding: 14,
-                display: "block",
-                cursor: "pointer",
-                borderColor: win.allowed ? "var(--c-primary)" : "var(--c-border)",
+                borderColor: win.allowed || canPlanTeams ? "var(--c-primary)" : "var(--c-border)",
               }}
             >
               <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                  marginBottom: 4,
-                }}
+                onClick={() => handleSelectSchedule(s, serviceDate)}
+                style={{ cursor: "pointer" }}
               >
-                <span className="muted" style={{ fontSize: "var(--fs-small)", fontWeight: 600 }}>
-                  {fmtMonthDay(serviceDate)} ({DAY_NAMES[s.day_of_week]})
-                </span>
-                {win.status === "open" ? (
-                  <span
-                    className="done-badge"
-                    style={{ background: "#16a34a", color: "#fff", padding: "3px 10px" }}
-                  >
-                    신청 가능
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 4,
+                  }}
+                >
+                  <span className="muted" style={{ fontSize: "var(--fs-small)", fontWeight: 600 }}>
+                    {fmtMonthDay(serviceDate)} ({DAY_NAMES[s.day_of_week]})
                   </span>
-                ) : win.status === "before" ? (
-                  <span
-                    className="caution-badge soft"
-                    style={{ background: "#64748b", color: "#fff", padding: "3px 10px" }}
-                  >
-                    전날부터 신청 가능
-                  </span>
-                ) : (
-                  <span
-                    className="caution-badge soft"
-                    style={{ background: "#94a3b8", color: "#fff", padding: "3px 10px" }}
-                  >
-                    마감
-                  </span>
-                )}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {canPlanTeams && (
+                      <span
+                        className="round-badge-2"
+                        style={{ padding: "3px 8px", fontSize: 12 }}
+                      >
+                        조 계획하기 →
+                      </span>
+                    )}
+                    {win.status === "open" ? (
+                      <span
+                        className="done-badge"
+                        style={{ background: "#16a34a", color: "#fff", padding: "3px 10px" }}
+                      >
+                        신청 가능
+                      </span>
+                    ) : win.status === "before" ? (
+                      <span
+                        className="caution-badge soft"
+                        style={{ background: "#64748b", color: "#fff", padding: "3px 10px" }}
+                      >
+                        전날부터 신청 가능
+                      </span>
+                    ) : (
+                      <span
+                        className="caution-badge soft"
+                        style={{ background: "#94a3b8", color: "#fff", padding: "3px 10px" }}
+                      >
+                        마감
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    fontWeight: 700,
+                    fontSize: "var(--fs-base)",
+                    color: "var(--c-text)",
+                    marginBottom: 6,
+                  }}
+                >
+                  {formatScheduleFullTitle(s)}
+                </div>
+
+                {/* 이미 신청한 사람들 이름 작게 표시 */}
+                <div
+                  style={{
+                    fontSize: "var(--fs-small)",
+                    color: slotApps.length > 0 ? "var(--c-primary)" : "var(--c-muted)",
+                    fontWeight: slotApps.length > 0 ? 600 : 400,
+                  }}
+                >
+                  {slotApps.length > 0
+                    ? `신청자 (${slotApps.length}명): ${slotApps.map((a) => a.publisher_name).join(", ")}`
+                    : "신청자 없음"}
+                </div>
               </div>
 
-              <div
-                style={{
-                  fontWeight: 700,
-                  fontSize: "var(--fs-base)",
-                  color: "var(--c-text)",
-                  marginBottom: 6,
-                }}
-              >
-                {formatScheduleFullTitle(s)}
-              </div>
-
-              {/* 이미 신청한 사람들 이름 작게 표시 */}
-              <div
-                style={{
-                  fontSize: "var(--fs-small)",
-                  color: slotApps.length > 0 ? "var(--c-primary)" : "var(--c-muted)",
-                  fontWeight: slotApps.length > 0 ? 600 : 400,
-                }}
-              >
-                {slotApps.length > 0
-                  ? `신청자 (${slotApps.length}명): ${slotApps.map((a) => a.publisher_name).join(", ")}`
-                  : "신청자 없음"}
-              </div>
-            </button>
+              {/* 편성된 전시대 조 현황 표시 (전시대 계정 & 인도자 계정 공통) */}
+              {formattedPlans.length > 0 && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    paddingTop: 10,
+                    borderTop: "1px dashed var(--c-border)",
+                    fontSize: "var(--fs-small)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 4,
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, color: "#166534" }}>
+                      📍 편성된 전시대 조
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-line"
+                      style={{ minHeight: 0, padding: "2px 8px", fontSize: 12 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        copySlotTeamSummary(s, serviceDate);
+                      }}
+                    >
+                      📋 조 편성 복사
+                    </button>
+                  </div>
+                  {formattedPlans.map((fp, idx) => (
+                    <div key={idx} style={{ marginTop: 4 }}>
+                      <span style={{ fontWeight: 700, color: "#15803d" }}>
+                        [{fp.locName}]
+                      </span>{" "}
+                      <span style={{ color: "#334155" }}>{fp.teamLines.join(" / ")}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           );
         })
       )}
