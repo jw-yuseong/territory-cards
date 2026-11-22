@@ -65,15 +65,24 @@ function getUpcomingServiceDate(s: CartSchedule, now: Date): string {
   return fmtYmd(thisWeekDate);
 }
 
-/** 조회할 신청 내역의 날짜 범위 (이번 주 월요일 ~ 다음 주 일요일, 총 14일) */
-function getTwoWeekQueryRange(now: Date): { startYmd: string; endYmd: string } {
+/** 조회할 신청 내역의 날짜 범위 (이번 주 월요일 ~ 다음 주 일요일, 총 14일) 및 오늘 기준 일주일 표시 범위 */
+function getTwoWeekQueryRange(now: Date): {
+  startYmd: string;
+  endYmd: string;
+  todayYmd: string;
+  weekEndYmd: string;
+} {
   const jsDay = now.getDay();
   const isoDay = jsDay === 0 ? 7 : jsDay;
   const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (isoDay - 1));
   const nextSunday = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 13);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 6);
   return {
     startYmd: fmtYmd(monday),
     endYmd: fmtYmd(nextSunday),
+    todayYmd: fmtYmd(today),
+    weekEndYmd: fmtYmd(weekEnd),
   };
 }
 
@@ -498,7 +507,7 @@ export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
         }}
       >
         <h2 className="section-title" style={{ margin: 0 }}>
-          🛒 전시대 신청
+          🛒 전시대 신청 ({fmtMonthDay(queryRange.todayYmd)} ~ {fmtMonthDay(queryRange.weekEndYmd)})
         </h2>
         {isAdmin && (
           <button
