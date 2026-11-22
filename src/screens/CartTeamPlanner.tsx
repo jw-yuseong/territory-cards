@@ -93,6 +93,7 @@ export default function CartTeamPlanner({
   serviceDate,
   locations,
   slotApplications,
+  cancelledApplications = [],
   existingPlans,
   allRecentPlans,
   threeMonthsAgoYmd,
@@ -104,6 +105,7 @@ export default function CartTeamPlanner({
   serviceDate: string;
   locations: CartLocation[];
   slotApplications: CartApplication[];
+  cancelledApplications?: CartApplication[];
   existingPlans: CartTeamPlan[];
   allRecentPlans: CartTeamPlan[];
   threeMonthsAgoYmd: string;
@@ -404,6 +406,24 @@ export default function CartTeamPlanner({
                 </span>
               );
             })}
+          </div>
+        )}
+
+        {/* 신청 취소자 명단 표시 (조 배정 대상에서는 제외됨) */}
+        {cancelledApplications.length > 0 && (
+          <div
+            style={{
+              marginTop: 10,
+              paddingTop: 8,
+              borderTop: "1px dashed var(--c-border)",
+              fontSize: "var(--fs-small)",
+              color: "var(--c-muted)",
+            }}
+          >
+            신청 취소자 ({cancelledApplications.length}명 · 조 배정 제외):{" "}
+            <span style={{ textDecoration: "line-through" }}>
+              {cancelledApplications.map((a) => a.publisher_name).join(", ")}
+            </span>
           </div>
         )}
       </div>

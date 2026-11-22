@@ -170,6 +170,8 @@ export default function CartScreen({
 
   // 신청 불가 시간 안내 팝업 모달
   const [popupMessage, setPopupMessage] = useState<string | null>(null);
+  // 신청 취소 확인 팝업 모달 대상
+  const [confirmCancelApp, setConfirmCancelApp] = useState<CartApplication | null>(null);
 
   // 신청 화면에서 전도인 검색 및 선택 상태
   const [searchPub, setSearchPub] = useState("");
@@ -329,7 +331,7 @@ export default function CartScreen({
     setBusy(false);
   }
 
-  async function handleCancel(app: CartApplication) {
+  function requestCancel(app: CartApplication) {
     if (!selectedSchedule) return;
     const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
     if (!canPlanTeams) {
@@ -339,14 +341,43 @@ export default function CartScreen({
         return;
       }
     }
-    if (!window.confirm(`'${app.publisher_name}' 전도인의 전시대 신청을 취소할까요?`)) return;
+    setConfirmCancelApp(app);
+  }
 
+  async function executeCancel() {
+    if (!confirmCancelApp) return;
+    const app = confirmCancelApp;
+    setConfirmCancelApp(null);
     setBusy(true);
     setError("");
     setMsg("");
     try {
       await cancelCartSlot(app.id);
-      setMsg(`'${app.publisher_name}' 전도인의 신청이 취소되었습니다.`);
+      setMsg(`'${app.publisher_name}' 전도인의 신청이 취소되어 '신청 취소자' 명단으로 이동되었습니다.`);
+      const apps = await fetchCartApplications(queryRange.startYmd, queryRange.endYmd);
+      setApplications(apps);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  async function handleRestoreCancelled(app: CartApplication) {
+    if (!selectedSchedule) return;
+    const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
+    if (!canPlanTeams) {
+      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
+      if (!win.allowed) {
+        showWindowNoticePopup(selectedSchedule, serviceDate, win);
+        return;
+      }
+    }
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await applyCartSlot(selectedSchedule.id, serviceDate, app.publisher_id);
+      setMsg(`'${app.publisher_name}' 전도인의 전시대 신청이 다시 복구되었습니다.`);
       const apps = await fetchCartApplications(queryRange.startYmd, queryRange.endYmd);
       setApplications(apps);
     } catch (e) {
@@ -430,12 +461,52 @@ export default function CartScreen({
     </div>
   );
 
+  // 신청 취소 재확인 팝업 모달
+  const cancelConfirmModal = confirmCancelApp && (
+    <div className="modal-back" onClick={() => setConfirmCancelApp(null)}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>⚠ 전시대 신청 취소 확인</h3>
+        <div
+          className="notice"
+          style={{ lineHeight: 1.6, fontSize: "var(--fs-base)", marginBottom: 14 }}
+        >
+          정말 <b style={{ color: "var(--c-danger)" }}>'{confirmCancelApp.publisher_name}'</b> 전도인의 전시대 신청을 취소하는 것이 맞습니까?
+          <div className="muted" style={{ marginTop: 6, fontSize: "var(--fs-small)" }}>
+            취소하면 삭제되지 않고 아래 '신청 취소자' 명단으로 이동되며, 언제든 다시 신청(복구)할 수 있습니다.
+          </div>
+        </div>
+        <div className="row">
+          <button
+            type="button"
+            className="btn-danger"
+            style={{ flex: 1 }}
+            disabled={busy}
+            onClick={executeCancel}
+          >
+            예, 취소합니다
+          </button>
+          <button
+            type="button"
+            className="btn-line"
+            style={{ flex: 1 }}
+            disabled={busy}
+            onClick={() => setConfirmCancelApp(null)}
+          >
+            아니오 (유지)
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   // 2) 일정을 선택했을 때: 인도자 조 편성 화면('plan') 또는 전시대 신청 화면('apply')
   if (selectedSchedule) {
     const serviceDate = getUpcomingServiceDate(selectedSchedule, now);
-    const slotApps = applications.filter(
+    const allSlotApps = applications.filter(
       (a) => a.schedule_id === selectedSchedule.id && a.service_date === serviceDate
     );
+    const activeSlotApps = allSlotApps.filter((a) => !a.is_cancelled);
+    const cancelledSlotApps = allSlotApps.filter((a) => a.is_cancelled);
     const slotPlans = teamPlans.filter(
       (p) => p.schedule_id === selectedSchedule.id && p.service_date === serviceDate
     );
@@ -446,7 +517,8 @@ export default function CartScreen({
           schedule={selectedSchedule}
           serviceDate={serviceDate}
           locations={locations}
-          slotApplications={slotApps}
+          slotApplications={activeSlotApps}
+          cancelledApplications={cancelledSlotApps}
           existingPlans={slotPlans}
           allRecentPlans={teamPlans}
           threeMonthsAgoYmd={queryRange.threeMonthsAgoYmd}
@@ -457,9 +529,10 @@ export default function CartScreen({
       );
     }
 
-    const appliedPubIds = new Set(slotApps.map((a) => a.publisher_id));
+    const appliedPubIds = new Set(activeSlotApps.map((a) => a.publisher_id));
+    const cancelledPubIds = new Set(cancelledSlotApps.map((a) => a.publisher_id));
     const selectedPub = publishers.find((p) => p.id === selectedPubId);
-    const alreadyAppliedApp = slotApps.find((a) => a.publisher_id === selectedPubId);
+    const alreadyAppliedApp = activeSlotApps.find((a) => a.publisher_id === selectedPubId);
     const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, now);
     const formattedPlans = getFormattedPlansForSlot(selectedSchedule.id, serviceDate);
 
@@ -553,15 +626,15 @@ export default function CartScreen({
               marginBottom: 8,
             }}
           >
-            신청한 전도인 ({slotApps.length}명)
+            신청한 전도인 ({activeSlotApps.length}명)
           </div>
-          {slotApps.length === 0 ? (
+          {activeSlotApps.length === 0 ? (
             <div className="muted" style={{ fontSize: "var(--fs-small)" }}>
               아직 신청한 사람이 없습니다. 아래에서 이름을 선택해 신청해 주세요.
             </div>
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {slotApps.map((a) => {
+              {activeSlotApps.map((a) => {
                 const cnt = threeMonthParticipationCounts.get(a.publisher_name.trim()) ?? 0;
                 return (
                   <span
@@ -590,7 +663,7 @@ export default function CartScreen({
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => handleCancel(a)}
+                      onClick={() => requestCancel(a)}
                       style={{
                         minHeight: 0,
                         padding: "1px 6px",
@@ -607,6 +680,76 @@ export default function CartScreen({
                   </span>
                 );
               })}
+            </div>
+          )}
+
+          {/* 신청 취소자 명단 (삭제하지 않고 따로 표시 + 다시 신청하면 복구) */}
+          {cancelledSlotApps.length > 0 && (
+            <div
+              style={{
+                marginTop: 12,
+                paddingTop: 10,
+                borderTop: "1px dashed var(--c-border)",
+              }}
+            >
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: "var(--fs-small)",
+                  color: "var(--c-muted)",
+                  marginBottom: 6,
+                }}
+              >
+                신청 취소자 ({cancelledSlotApps.length}명) — 실수로 취소한 경우 [재신청]을 누르세요
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {cancelledSlotApps.map((a) => {
+                  const cnt = threeMonthParticipationCounts.get(a.publisher_name.trim()) ?? 0;
+                  return (
+                    <span
+                      key={a.id}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "4px 10px",
+                        borderRadius: 999,
+                        background: "#f8fafc",
+                        border: "1px solid #cbd5e1",
+                        fontSize: "var(--fs-small)",
+                        fontWeight: 600,
+                        color: "#64748b",
+                      }}
+                    >
+                      <span style={{ textDecoration: "line-through" }}>
+                        {a.publisher_name}
+                        {canPlanTeams && (
+                          <span style={{ fontSize: 11, fontWeight: 400, marginLeft: 3 }}>
+                            ({cnt}회)
+                          </span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleRestoreCancelled(a)}
+                        style={{
+                          minHeight: 0,
+                          padding: "1px 6px",
+                          fontSize: 12,
+                          borderRadius: 999,
+                          border: "1px solid #86efac",
+                          background: "#f0fdf4",
+                          color: "#15803d",
+                          fontWeight: 700,
+                        }}
+                      >
+                        재신청
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -639,6 +782,7 @@ export default function CartScreen({
             ) : (
               filteredPublishers.map((p) => {
                 const isApplied = appliedPubIds.has(p.id);
+                const isCancelled = cancelledPubIds.has(p.id);
                 const isSelected = selectedPubId === p.id;
                 const cnt = threeMonthParticipationCounts.get(p.name.trim()) ?? 0;
                 return (
@@ -661,7 +805,7 @@ export default function CartScreen({
                         ({cnt}회)
                       </span>
                     )}
-                    {isApplied ? " (신청됨)" : ""}
+                    {isApplied ? " (신청됨)" : isCancelled ? " (취소됨)" : ""}
                   </button>
                 );
               })
@@ -674,7 +818,7 @@ export default function CartScreen({
             className="btn-danger"
             style={{ width: "100%", marginTop: 8 }}
             disabled={busy}
-            onClick={() => handleCancel(alreadyAppliedApp)}
+            onClick={() => requestCancel(alreadyAppliedApp)}
           >
             {busy ? "처리 중..." : `'${selectedPub?.name}' 신청 취소하기`}
           </button>
@@ -694,6 +838,7 @@ export default function CartScreen({
         )}
 
         {popupModal}
+        {cancelConfirmModal}
       </div>
     );
   }
@@ -746,9 +891,11 @@ export default function CartScreen({
       ) : (
         upcomingItems.map(({ schedule: s, serviceDate }) => {
           const win = checkApplicationWindow(serviceDate, s.start_time, now);
-          const slotApps = applications.filter(
+          const allSlotApps = applications.filter(
             (a) => a.schedule_id === s.id && a.service_date === serviceDate
           );
+          const slotApps = allSlotApps.filter((a) => !a.is_cancelled);
+          const cancelledApps = allSlotApps.filter((a) => a.is_cancelled);
           const formattedPlans = getFormattedPlansForSlot(s.id, serviceDate);
 
           return (
@@ -858,6 +1005,22 @@ export default function CartScreen({
                     "신청자 없음"
                   )}
                 </div>
+
+                {/* 신청 취소자가 있는 경우 아래에 작게 표시 */}
+                {cancelledApps.length > 0 && (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: "var(--c-muted)",
+                      marginTop: 4,
+                    }}
+                  >
+                    신청 취소자 ({cancelledApps.length}명):{" "}
+                    <span style={{ textDecoration: "line-through" }}>
+                      {cancelledApps.map((a) => a.publisher_name).join(", ")}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* 편성된 전시대 조 현황 표시 (전시대 계정 & 인도자 계정 공통) */}

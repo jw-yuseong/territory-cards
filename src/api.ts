@@ -1218,22 +1218,42 @@ export async function fetchCartApplications(
   startDate: string,
   endDate: string
 ): Promise<CartApplication[]> {
-  const { data, error } = await supabase
-    .from("cart_applications")
-    .select("id, schedule_id, service_date, publisher_id, created_at, cart_publishers(name)")
-    .gte("service_date", startDate)
-    .lte("service_date", endDate)
-    .order("created_at");
-  if (error) throw new Error(error.message);
   type RawRow = {
     id: string;
     schedule_id: string;
     service_date: string;
     publisher_id: string;
     created_at: string;
+    is_cancelled?: boolean;
+    cancelled_at?: string | null;
     cart_publishers: { name: string } | { name: string }[] | null;
   };
-  return ((data ?? []) as unknown as RawRow[]).map((r) => {
+
+  let rows: RawRow[] = [];
+  const { data, error } = await supabase
+    .from("cart_applications")
+    .select(
+      "id, schedule_id, service_date, publisher_id, created_at, is_cancelled, cancelled_at, cart_publishers(name)"
+    )
+    .gte("service_date", startDate)
+    .lte("service_date", endDate)
+    .order("created_at");
+
+  if (error) {
+    // patch21_cart_cancel_status.sql 적용 전일 경우 구 스키마로 조회 폴백
+    const { data: fbData, error: fbErr } = await supabase
+      .from("cart_applications")
+      .select("id, schedule_id, service_date, publisher_id, created_at, cart_publishers(name)")
+      .gte("service_date", startDate)
+      .lte("service_date", endDate)
+      .order("created_at");
+    if (fbErr) throw new Error(fbErr.message);
+    rows = (fbData ?? []) as unknown as RawRow[];
+  } else {
+    rows = (data ?? []) as unknown as RawRow[];
+  }
+
+  return rows.map((r) => {
     const pub = Array.isArray(r.cart_publishers) ? r.cart_publishers[0] : r.cart_publishers;
     return {
       id: r.id,
@@ -1242,6 +1262,8 @@ export async function fetchCartApplications(
       publisher_id: r.publisher_id,
       publisher_name: pub?.name ?? "",
       created_at: r.created_at,
+      is_cancelled: Boolean(r.is_cancelled),
+      cancelled_at: r.cancelled_at ?? null,
     };
   });
 }
@@ -1251,6 +1273,31 @@ export async function applyCartSlot(
   serviceDate: string,
   publisherId: string
 ): Promise<void> {
+  // 이미 신청 또는 신청 취소 상태로 행이 있는지 먼저 확인
+  const { data: existingRows } = await supabase
+    .from("cart_applications")
+    .select("id, is_cancelled")
+    .match({
+      schedule_id: scheduleId,
+      service_date: serviceDate,
+      publisher_id: publisherId,
+    })
+    .limit(1);
+
+  if (existingRows && existingRows.length > 0) {
+    const row = existingRows[0] as { id: string; is_cancelled?: boolean };
+    if (row.is_cancelled) {
+      // 신청 취소자 명단에 있던 사람이 다시 신청하면 원래대로 복구
+      const { error: upErr } = await supabase
+        .from("cart_applications")
+        .update({ is_cancelled: false, cancelled_at: null })
+        .eq("id", row.id);
+      if (upErr) throw new Error(upErr.message);
+      return;
+    }
+    throw new Error("이미 이 시간대에 신청하셨습니다.");
+  }
+
   const { error } = await supabase.from("cart_applications").insert({
     schedule_id: scheduleId,
     service_date: serviceDate,
@@ -1265,8 +1312,25 @@ export async function applyCartSlot(
 }
 
 export async function cancelCartSlot(applicationId: string): Promise<void> {
-  const { error } = await supabase.from("cart_applications").delete().eq("id", applicationId);
-  if (error) throw new Error(error.message);
+  // 삭제하지 않고 신청 취소자 명단(is_cancelled = true)으로 이동
+  const { data, error } = await supabase
+    .from("cart_applications")
+    .update({
+      is_cancelled: true,
+      cancelled_at: new Date().toISOString(),
+    })
+    .eq("id", applicationId)
+    .select("id");
+
+  if (!error && data && data.length > 0) return;
+
+  // 만약 patch21 SQL 적용 전이거나 UPDATE 권한이 아직 없을 때를 위한 폴백
+  console.warn("cancelCartSlot soft-cancel failed, falling back to delete:", error);
+  const { error: delErr } = await supabase
+    .from("cart_applications")
+    .delete()
+    .eq("id", applicationId);
+  if (delErr) throw new Error(delErr.message || error?.message || "취소에 실패했습니다.");
 }
 
 

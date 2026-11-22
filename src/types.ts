@@ -203,6 +203,8 @@ export interface CartApplication {
   publisher_id: string;
   publisher_name: string;
   created_at: string;
+  is_cancelled?: boolean;
+  cancelled_at?: string | null;
 }
 
 
