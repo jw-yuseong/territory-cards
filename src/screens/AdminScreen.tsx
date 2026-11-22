@@ -23,6 +23,7 @@ import NameManager from "./NameManager";
 import CircuitReport from "./CircuitReport";
 import PasswordChange from "./PasswordChange";
 import DbBackup from "./DbBackup";
+import CartAdmin from "./CartAdmin";
 import { friendlyError } from "../errors";
 
 export default function AdminScreen() {
@@ -42,6 +43,7 @@ export default function AdminScreen() {
   const [showReport, setShowReport] = useState(false); // 순회 방문 보고서
   const [showPw, setShowPw] = useState(false); // 비밀번호 변경
   const [showBackup, setShowBackup] = useState(false); // DB 백업/리뉴얼
+  const [showCartAdmin, setShowCartAdmin] = useState(false); // 전시대 관리 (시간표·승인 명단)
   const [roundResetCard, setRoundResetCard] = useState<CardSummary | null>(null); // 회차 선택 초기화 대상
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<{ parsed: ParsedCard; file: File } | null>(null);
@@ -293,6 +295,9 @@ export default function AdminScreen() {
   if (showBackup) {
     return <DbBackup onBack={() => { setShowBackup(false); loadCards(); }} />;
   }
+  if (showCartAdmin) {
+    return <CartAdmin onBack={() => setShowCartAdmin(false)} />;
+  }
 
   return (
     <div>
@@ -309,6 +314,13 @@ export default function AdminScreen() {
           ⬆ 구역카드 업로드
         </button>
       </div>
+      <button
+        className="btn-line"
+        style={{ width: "100%", marginBottom: 10 }}
+        onClick={() => setShowCartAdmin(true)}
+      >
+        🛒 전시대 관리 (요일·시간표 및 승인 명단)
+      </button>
       <button
         className="btn-line"
         style={{ width: "100%", marginBottom: 10 }}

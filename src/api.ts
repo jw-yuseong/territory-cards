@@ -16,6 +16,9 @@ import type {
   TerritoryUnit,
   VisitRecord,
   CardIncompleteNote,
+  CartSchedule,
+  CartPublisher,
+  CartApplication,
 } from "./types";
 
 function must<T>(data: T | null, error: { message: string } | null): T {
@@ -1062,4 +1065,159 @@ export async function adminDeleteLetterBuilding(building: string): Promise<void>
     .delete()
     .eq("building", building);
   if (delErr) throw new Error(delErr.message || error.message);
+}
+
+
+// ---- 전시대 (Cart) API ----
+
+export async function fetchCartSchedules(): Promise<CartSchedule[]> {
+  const { data, error } = await supabase
+    .from("cart_schedules")
+    .select("id, day_of_week, start_time, end_time, time_label, meeting_note, sort_order, is_active")
+    .eq("is_active", true)
+    .order("day_of_week")
+    .order("start_time")
+    .order("sort_order");
+  return must(data, error);
+}
+
+export async function addCartSchedule(input: {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  time_label: string;
+  meeting_note: string;
+}): Promise<void> {
+  const { error } = await supabase.from("cart_schedules").insert({
+    day_of_week: input.day_of_week,
+    start_time: input.start_time.trim(),
+    end_time: input.end_time.trim(),
+    time_label: input.time_label.trim(),
+    meeting_note: input.meeting_note.trim(),
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function updateCartSchedule(
+  id: string,
+  input: {
+    day_of_week: number;
+    start_time: string;
+    end_time: string;
+    time_label: string;
+    meeting_note: string;
+  }
+): Promise<void> {
+  const { error } = await supabase
+    .from("cart_schedules")
+    .update({
+      day_of_week: input.day_of_week,
+      start_time: input.start_time.trim(),
+      end_time: input.end_time.trim(),
+      time_label: input.time_label.trim(),
+      meeting_note: input.meeting_note.trim(),
+    })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteCartSchedule(id: string): Promise<void> {
+  const { error } = await supabase.from("cart_schedules").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchCartPublishers(): Promise<CartPublisher[]> {
+  const { data, error } = await supabase
+    .from("cart_publishers")
+    .select("id, name, is_active")
+    .eq("is_active", true)
+    .order("name");
+  return must(data, error);
+}
+
+export async function addCartPublisher(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("이름을 입력해 주세요.");
+  // 이미 숨김(is_active=false)으로 있는 이름이면 다시 활성화
+  const { data: existing } = await supabase
+    .from("cart_publishers")
+    .select("id, is_active")
+    .eq("name", trimmed)
+    .limit(1);
+  if (existing && existing.length > 0) {
+    if (existing[0].is_active) {
+      throw new Error(`'${trimmed}' 전도인은 이미 명단에 있습니다.`);
+    }
+    const { error: upErr } = await supabase
+      .from("cart_publishers")
+      .update({ is_active: true })
+      .eq("id", existing[0].id);
+    if (upErr) throw new Error(upErr.message);
+    return;
+  }
+  const { error } = await supabase.from("cart_publishers").insert({ name: trimmed, is_active: true });
+  if (error) throw new Error(error.message);
+}
+
+export async function removeCartPublisher(id: string): Promise<"deleted" | "hidden"> {
+  const { error } = await supabase.from("cart_publishers").delete().eq("id", id);
+  if (!error) return "deleted";
+  const { error: e2 } = await supabase.from("cart_publishers").update({ is_active: false }).eq("id", id);
+  if (e2) throw new Error(e2.message);
+  return "hidden";
+}
+
+export async function fetchCartApplications(
+  startDate: string,
+  endDate: string
+): Promise<CartApplication[]> {
+  const { data, error } = await supabase
+    .from("cart_applications")
+    .select("id, schedule_id, service_date, publisher_id, created_at, cart_publishers(name)")
+    .gte("service_date", startDate)
+    .lte("service_date", endDate)
+    .order("created_at");
+  if (error) throw new Error(error.message);
+  type RawRow = {
+    id: string;
+    schedule_id: string;
+    service_date: string;
+    publisher_id: string;
+    created_at: string;
+    cart_publishers: { name: string } | { name: string }[] | null;
+  };
+  return ((data ?? []) as unknown as RawRow[]).map((r) => {
+    const pub = Array.isArray(r.cart_publishers) ? r.cart_publishers[0] : r.cart_publishers;
+    return {
+      id: r.id,
+      schedule_id: r.schedule_id,
+      service_date: r.service_date,
+      publisher_id: r.publisher_id,
+      publisher_name: pub?.name ?? "",
+      created_at: r.created_at,
+    };
+  });
+}
+
+export async function applyCartSlot(
+  scheduleId: string,
+  serviceDate: string,
+  publisherId: string
+): Promise<void> {
+  const { error } = await supabase.from("cart_applications").insert({
+    schedule_id: scheduleId,
+    service_date: serviceDate,
+    publisher_id: publisherId,
+  });
+  if (error) {
+    if (error.message.includes("duplicate") || error.message.includes("unique")) {
+      throw new Error("이미 이 시간대에 신청하셨습니다.");
+    }
+    throw new Error(error.message);
+  }
+}
+
+export async function cancelCartSlot(applicationId: string): Promise<void> {
+  const { error } = await supabase.from("cart_applications").delete().eq("id", applicationId);
+  if (error) throw new Error(error.message);
 }

@@ -1,0 +1,568 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  applyCartSlot,
+  cancelCartSlot,
+  fetchCartApplications,
+  fetchCartPublishers,
+  fetchCartSchedules,
+} from "../api";
+import type { CartApplication, CartPublisher, CartSchedule } from "../types";
+import { friendlyError } from "../errors";
+import { matchName } from "../chosung";
+import CartAdmin, { DAY_NAMES, formatScheduleFullTitle } from "./CartAdmin";
+
+/** Date -> 'YYYY-MM-DD' */
+function fmtYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** '2026-11-24' -> '11월 24일' */
+function fmtMonthDay(ymd: string): string {
+  const [, m, d] = ymd.split("-");
+  return `${Number(m)}월 ${Number(d)}일`;
+}
+
+/** 이번 주(월요일 ~ 일요일)의 시작일(월요일 00:00)과 해당 요일(1~7)의 날짜('YYYY-MM-DD') 계산 */
+function getCurrentWeekDates(now: Date): {
+  mondayYmd: string;
+  sundayYmd: string;
+  dateByDayOfWeek: Record<number, string>;
+} {
+  const jsDay = now.getDay(); // 0=일, 1=월 ... 6=토
+  const isoDay = jsDay === 0 ? 7 : jsDay; // 1=월 ... 7=일
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (isoDay - 1));
+  const dateByDayOfWeek: Record<number, string> = {};
+  for (let d = 1; d <= 7; d++) {
+    const dt = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + (d - 1));
+    dateByDayOfWeek[d] = fmtYmd(dt);
+  }
+  return {
+    mondayYmd: dateByDayOfWeek[1],
+    sundayYmd: dateByDayOfWeek[7],
+    dateByDayOfWeek,
+  };
+}
+
+export type WindowCheck = {
+  allowed: boolean;
+  status: "before" | "open" | "closed";
+  openAtStr: string;
+  closeAtStr: string;
+};
+
+/**
+ * 신청 가능 시간 판별:
+ * 그 전날(00:00)부터 전시대가 시작되기 4시간 전까지 신청 및 취소 가능
+ */
+function checkApplicationWindow(
+  serviceDateYmd: string,
+  startTime: string,
+  now: Date
+): WindowCheck {
+  const [y, m, d] = serviceDateYmd.split("-").map(Number);
+  const [hh, mm] = startTime.split(":").map((v) => Number(v) || 0);
+
+  // 전날 00:00:00
+  const openAt = new Date(y, m - 1, d - 1, 0, 0, 0, 0);
+  // 전시대 시작 시각 - 4시간
+  const startAt = new Date(y, m - 1, d, hh, mm, 0, 0);
+  const closeAt = new Date(startAt.getTime() - 4 * 60 * 60 * 1000);
+
+  const openMonth = openAt.getMonth() + 1;
+  const openDate = openAt.getDate();
+  const closeMonth = closeAt.getMonth() + 1;
+  const closeDate = closeAt.getDate();
+  const closeHour = closeAt.getHours();
+  const closeMin = closeAt.getMinutes();
+  const closePeriod = closeHour < 12 ? "오전" : "오후";
+  const closeH12 = closeHour % 12 === 0 ? 12 : closeHour % 12;
+
+  const openAtStr = `${openMonth}월 ${openDate}일 오전 0시(자정)`;
+  const closeAtStr = `${closeMonth}월 ${closeDate}일 ${closePeriod} ${closeH12}시${closeMin > 0 ? ` ${closeMin}분` : ""}`;
+
+  const nowMs = now.getTime();
+  if (nowMs < openAt.getTime()) {
+    return { allowed: false, status: "before", openAtStr, closeAtStr };
+  }
+  if (nowMs > closeAt.getTime()) {
+    return { allowed: false, status: "closed", openAtStr, closeAtStr };
+  }
+  return { allowed: true, status: "open", openAtStr, closeAtStr };
+}
+
+export default function CartScreen({ isAdmin = false }: { isAdmin?: boolean }) {
+  const [schedules, setSchedules] = useState<CartSchedule[]>([]);
+  const [publishers, setPublishers] = useState<CartPublisher[]>([]);
+  const [applications, setApplications] = useState<CartApplication[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+
+  // 선택한 전시대 일정 (신청 화면 진입)
+  const [selectedSchedule, setSelectedSchedule] = useState<CartSchedule | null>(null);
+  // 구역관리자일 때 전시대 설정 화면으로 전환
+  const [showAdminConfig, setShowAdminConfig] = useState(false);
+
+  // 신청 불가 시간 안내 팝업 모달
+  const [popupMessage, setPopupMessage] = useState<string | null>(null);
+
+  // 신청 화면에서 전도인 검색 및 선택 상태
+  const [searchPub, setSearchPub] = useState("");
+  const [selectedPubId, setSelectedPubId] = useState<string>(
+    () => localStorage.getItem("lastCartPublisherId") ?? ""
+  );
+
+  const [now, setNow] = useState<Date>(() => new Date());
+
+  // 30초마다 현재 시각 갱신 (마감 시각 실시간 반영)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const weekInfo = useMemo(() => getCurrentWeekDates(now), [now]);
+
+  async function loadAll() {
+    try {
+      const [sc, ps, apps] = await Promise.all([
+        fetchCartSchedules(),
+        fetchCartPublishers(),
+        fetchCartApplications(weekInfo.mondayYmd, weekInfo.sundayYmd),
+      ]);
+      setSchedules(sc);
+      setPublishers(ps);
+      setApplications(apps);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadAll();
+  }, [weekInfo.mondayYmd, weekInfo.sundayYmd]);
+
+  // 뒤로가기(쓸어넘기기) 시 신청 화면에서 리스트 화면으로 복귀
+  useEffect(() => {
+    function onPop() {
+      setSelectedSchedule(null);
+      setError("");
+      setMsg("");
+    }
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  function showWindowNoticePopup(s: CartSchedule, win: WindowCheck) {
+    const title = formatScheduleFullTitle(s);
+    const serviceDate = weekInfo.dateByDayOfWeek[s.day_of_week];
+    setPopupMessage(
+      `전시대 신청 및 취소는 그 전날부터 전시대가 시작되기 4시간 전까지만 가능합니다.\n\n` +
+        `📌 선택한 일정:\n${fmtMonthDay(serviceDate)} ${title}\n\n` +
+        `⏰ 신청·취소 가능 시간:\n${win.openAtStr} ~ ${win.closeAtStr}까지`
+    );
+  }
+
+  function handleSelectSchedule(s: CartSchedule) {
+    const serviceDate = weekInfo.dateByDayOfWeek[s.day_of_week];
+    const win = checkApplicationWindow(serviceDate, s.start_time, new Date());
+    if (!win.allowed) {
+      showWindowNoticePopup(s, win);
+      return;
+    }
+    setError("");
+    setMsg("");
+    setSearchPub("");
+    setSelectedSchedule(s);
+    window.history.pushState({ cartDetail: true }, "");
+  }
+
+  function closeDetail() {
+    if (window.history.state && window.history.state.cartDetail) {
+      window.history.back();
+    } else {
+      setSelectedSchedule(null);
+      setError("");
+      setMsg("");
+    }
+  }
+
+  async function handleApply() {
+    if (!selectedSchedule || !selectedPubId) return;
+    const serviceDate = weekInfo.dateByDayOfWeek[selectedSchedule.day_of_week];
+    const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
+    if (!win.allowed) {
+      showWindowNoticePopup(selectedSchedule, win);
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await applyCartSlot(selectedSchedule.id, serviceDate, selectedPubId);
+      localStorage.setItem("lastCartPublisherId", selectedPubId);
+      const pubName = publishers.find((p) => p.id === selectedPubId)?.name ?? "";
+      setMsg(`'${pubName}' 전도인 전시대 신청이 완료되었습니다.`);
+      const apps = await fetchCartApplications(weekInfo.mondayYmd, weekInfo.sundayYmd);
+      setApplications(apps);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  async function handleCancel(app: CartApplication) {
+    if (!selectedSchedule) return;
+    const serviceDate = weekInfo.dateByDayOfWeek[selectedSchedule.day_of_week];
+    const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
+    if (!win.allowed) {
+      showWindowNoticePopup(selectedSchedule, win);
+      return;
+    }
+    if (!window.confirm(`'${app.publisher_name}' 전도인의 전시대 신청을 취소할까요?`)) return;
+
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await cancelCartSlot(app.id);
+      setMsg(`'${app.publisher_name}' 전도인의 신청이 취소되었습니다.`);
+      const apps = await fetchCartApplications(weekInfo.mondayYmd, weekInfo.sundayYmd);
+      setApplications(apps);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  const filteredPublishers = useMemo(() => {
+    const q = searchPub.trim();
+    if (!q) return publishers;
+    return publishers.filter((p) => matchName(p.name, q));
+  }, [publishers, searchPub]);
+
+  if (showAdminConfig) {
+    return (
+      <CartAdmin
+        onBack={() => {
+          setShowAdminConfig(false);
+          loadAll();
+        }}
+      />
+    );
+  }
+
+  if (loading) return <div className="loading">이번 주 전시대 일정을 불러오는 중...</div>;
+
+  // 신청 불가 시간 안내 팝업
+  const popupModal = popupMessage && (
+    <div className="modal-back" onClick={() => setPopupMessage(null)}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>⏰ 전시대 신청 가능 시간 안내</h3>
+        <div
+          className="notice"
+          style={{ whiteSpace: "pre-line", lineHeight: 1.6, fontSize: "var(--fs-base)" }}
+        >
+          {popupMessage}
+        </div>
+        <button className="btn-primary" onClick={() => setPopupMessage(null)}>
+          확인
+        </button>
+      </div>
+    </div>
+  );
+
+  // 2) 전시대 신청 화면 (일정을 선택했을 때)
+  if (selectedSchedule) {
+    const serviceDate = weekInfo.dateByDayOfWeek[selectedSchedule.day_of_week];
+    const slotApps = applications.filter(
+      (a) => a.schedule_id === selectedSchedule.id && a.service_date === serviceDate
+    );
+    const appliedPubIds = new Set(slotApps.map((a) => a.publisher_id));
+    const selectedPub = publishers.find((p) => p.id === selectedPubId);
+    const alreadyAppliedApp = slotApps.find((a) => a.publisher_id === selectedPubId);
+    const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, now);
+
+    return (
+      <div>
+        <button className="btn-line" onClick={closeDetail} style={{ marginBottom: 12 }}>
+          ← 이번 주 전시대 목록으로
+        </button>
+
+        <div className="card-box" style={{ padding: 14, borderColor: "var(--c-primary)" }}>
+          <div className="muted" style={{ fontSize: "var(--fs-small)", marginBottom: 2 }}>
+            {fmtMonthDay(serviceDate)} ({DAY_NAMES[selectedSchedule.day_of_week]})
+          </div>
+          <div style={{ fontWeight: 700, fontSize: "var(--fs-lg)", marginBottom: 6 }}>
+            {formatScheduleFullTitle(selectedSchedule)}
+          </div>
+          <div className="muted" style={{ fontSize: "var(--fs-small)" }}>
+            신청·취소 마감: {win.closeAtStr}까지 (시작 4시간 전)
+          </div>
+        </div>
+
+        {/* 이미 신청한 사람들 이름 (작게 표시 + 취소 가능) */}
+        <div className="card-box" style={{ padding: 12 }}>
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: "var(--fs-small)",
+              color: "var(--c-muted)",
+              marginBottom: 8,
+            }}
+          >
+            신청한 전도인 ({slotApps.length}명)
+          </div>
+          {slotApps.length === 0 ? (
+            <div className="muted" style={{ fontSize: "var(--fs-small)" }}>
+              아직 신청한 사람이 없습니다. 아래에서 이름을 선택해 신청해 주세요.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {slotApps.map((a) => (
+                <span
+                  key={a.id}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    background: "#eff6ff",
+                    border: "1px solid #bfdbfe",
+                    fontSize: "var(--fs-small)",
+                    fontWeight: 600,
+                    color: "#1e40af",
+                  }}
+                >
+                  {a.publisher_name}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => handleCancel(a)}
+                    style={{
+                      minHeight: 0,
+                      padding: "1px 6px",
+                      fontSize: 12,
+                      borderRadius: 999,
+                      border: "1px solid #fca5a5",
+                      background: "#fef2f2",
+                      color: "#b91c1c",
+                      fontWeight: 700,
+                    }}
+                  >
+                    취소
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {error && <div className="error-msg">{error}</div>}
+        {msg && <div className="notice">{msg}</div>}
+
+        {/* 신청자 본인 이름 선택 */}
+        <div className="field" style={{ marginTop: 14 }}>
+          <label>
+            신청할 본인 이름 선택
+            {selectedPub && (
+              <span style={{ color: "var(--c-primary)", marginLeft: 8, fontWeight: 700 }}>
+                · 선택됨: {selectedPub.name}
+              </span>
+            )}
+          </label>
+          <input
+            type="text"
+            value={searchPub}
+            onChange={(e) => setSearchPub(e.target.value)}
+            placeholder="이름 또는 초성 검색 (예: 박보람, ㅂㅂㄹ)"
+            style={{ marginBottom: 8 }}
+          />
+          <div className="choice-grid" style={{ maxHeight: 240, overflowY: "auto" }}>
+            {filteredPublishers.length === 0 ? (
+              <div className="muted" style={{ padding: "8px 0" }}>
+                검색 결과가 없습니다.
+              </div>
+            ) : (
+              filteredPublishers.map((p) => {
+                const isApplied = appliedPubIds.has(p.id);
+                const isSelected = selectedPubId === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`choice-btn ${isSelected ? "selected" : ""}`}
+                    onClick={() => setSelectedPubId(p.id)}
+                  >
+                    {p.name}
+                    {isApplied ? " (신청됨)" : ""}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {alreadyAppliedApp ? (
+          <button
+            className="btn-danger"
+            style={{ width: "100%", marginTop: 8 }}
+            disabled={busy}
+            onClick={() => handleCancel(alreadyAppliedApp)}
+          >
+            {busy ? "처리 중..." : `'${selectedPub?.name}' 신청 취소하기`}
+          </button>
+        ) : (
+          <button
+            className="btn-primary"
+            style={{ marginTop: 8 }}
+            disabled={busy || !selectedPubId}
+            onClick={handleApply}
+          >
+            {busy
+              ? "신청 중..."
+              : selectedPub
+                ? `'${selectedPub.name}' 이름으로 전시대 신청하기`
+                : "이름을 선택해 주세요"}
+          </button>
+        )}
+
+        {popupModal}
+      </div>
+    );
+  }
+
+  // 1) 첫 화면: 이번 주 전시대 리스트
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 8,
+        }}
+      >
+        <h2 className="section-title" style={{ margin: 0 }}>
+          🛒 이번 주 전시대 신청 ({fmtMonthDay(weekInfo.mondayYmd)} ~ {fmtMonthDay(weekInfo.sundayYmd)})
+        </h2>
+        {isAdmin && (
+          <button
+            className="btn-line"
+            style={{ padding: "6px 12px", minHeight: 0, fontSize: "var(--fs-small)" }}
+            onClick={() => setShowAdminConfig(true)}
+          >
+            ⚙ 전시대 설정
+          </button>
+        )}
+      </div>
+
+      <div className="notice">
+        전시대 신청 및 취소는 <b>그 전날(오전 0시)부터 전시대 시작 4시간 전까지</b> 가능합니다.
+        신청할 시간대를 눌러 주세요.
+      </div>
+
+      {error && <div className="error-msg">{error}</div>}
+      {msg && <div className="notice">{msg}</div>}
+
+      {schedules.length === 0 ? (
+        <div className="muted" style={{ padding: "16px 0" }}>
+          등록된 전시대 일정이 없습니다.
+        </div>
+      ) : (
+        schedules.map((s) => {
+          const serviceDate = weekInfo.dateByDayOfWeek[s.day_of_week];
+          const win = checkApplicationWindow(serviceDate, s.start_time, now);
+          const slotApps = applications.filter(
+            (a) => a.schedule_id === s.id && a.service_date === serviceDate
+          );
+
+          return (
+            <button
+              key={s.id}
+              type="button"
+              className="card-box"
+              onClick={() => handleSelectSchedule(s)}
+              style={{
+                width: "100%",
+                textAlign: "left",
+                padding: 14,
+                display: "block",
+                cursor: "pointer",
+                borderColor: win.allowed ? "var(--c-primary)" : "var(--c-border)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 4,
+                }}
+              >
+                <span className="muted" style={{ fontSize: "var(--fs-small)", fontWeight: 600 }}>
+                  {fmtMonthDay(serviceDate)} ({DAY_NAMES[s.day_of_week]})
+                </span>
+                {win.status === "open" ? (
+                  <span
+                    className="done-badge"
+                    style={{ background: "#16a34a", color: "#fff", padding: "3px 10px" }}
+                  >
+                    신청 가능
+                  </span>
+                ) : win.status === "before" ? (
+                  <span
+                    className="caution-badge soft"
+                    style={{ background: "#64748b", color: "#fff", padding: "3px 10px" }}
+                  >
+                    전날부터 신청 가능
+                  </span>
+                ) : (
+                  <span
+                    className="caution-badge soft"
+                    style={{ background: "#94a3b8", color: "#fff", padding: "3px 10px" }}
+                  >
+                    마감
+                  </span>
+                )}
+              </div>
+
+              <div
+                style={{
+                  fontWeight: 700,
+                  fontSize: "var(--fs-base)",
+                  color: "var(--c-text)",
+                  marginBottom: 6,
+                }}
+              >
+                {formatScheduleFullTitle(s)}
+              </div>
+
+              {/* 이미 신청한 사람들 이름 작게 표시 */}
+              <div
+                style={{
+                  fontSize: "var(--fs-small)",
+                  color: slotApps.length > 0 ? "var(--c-primary)" : "var(--c-muted)",
+                  fontWeight: slotApps.length > 0 ? 600 : 400,
+                }}
+              >
+                {slotApps.length > 0
+                  ? `신청자 (${slotApps.length}명): ${slotApps.map((a) => a.publisher_name).join(", ")}`
+                  : "신청자 없음"}
+              </div>
+            </button>
+          );
+        })
+      )}
+
+      {popupModal}
+    </div>
+  );
+}

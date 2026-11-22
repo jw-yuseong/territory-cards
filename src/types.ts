@@ -175,3 +175,32 @@ export function getCardMaxDoneRound(
   }
   return maxDone;
 }
+
+
+// ---- 전시대 (Cart) ----
+
+export interface CartSchedule {
+  id: string;
+  day_of_week: number; // 1=월, 2=화, 3=수, 4=목, 5=금, 6=토, 7=일
+  start_time: string; // '18:00'
+  end_time: string; // '20:00'
+  time_label: string; // '오후 6시~8시'
+  meeting_note: string; // '봉사모임 5시45분' | '봉사모임 없음'
+  sort_order: number;
+  is_active: boolean;
+}
+
+export interface CartPublisher {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
+export interface CartApplication {
+  id: string;
+  schedule_id: string;
+  service_date: string; // 'YYYY-MM-DD'
+  publisher_id: string;
+  publisher_name: string;
+  created_at: string;
+}

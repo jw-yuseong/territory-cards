@@ -16,13 +16,15 @@ export const ID_TO_EMAIL: Record<string, string> = {
   봉사자: "user@jw.org",
   봉사인도자: "conductor@jw.org",
   구역관리자: "jwyuseong99@gmail.com",
+  전시대: "cart@jw.org",
 };
 
-export type Role = "publisher" | "conductor" | "admin";
+export type Role = "publisher" | "conductor" | "admin" | "cart";
 
-// 로그인된 이메일 → 역할 (봉사자: 봉사기록만 / 인도자: +인도자 화면 / 관리자: 전부)
+// 로그인된 이메일 → 역할 (봉사자: 봉사기록만 / 인도자: +인도자 화면 / 관리자: 전부 / 전시대: 전시대 전용)
 export const EMAIL_TO_ROLE: Record<string, Role> = {
   "user@jw.org": "publisher",
   "conductor@jw.org": "conductor",
   "jwyuseong99@gmail.com": "admin",
+  "cart@jw.org": "cart",
 };

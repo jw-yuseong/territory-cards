@@ -7,8 +7,9 @@ import Login from "./screens/Login";
 import PublisherScreen from "./screens/PublisherScreen";
 import ConductorScreen from "./screens/ConductorScreen";
 import AdminScreen from "./screens/AdminScreen";
+import CartScreen from "./screens/CartScreen";
 
-type Tab = "publisher" | "conductor" | "admin";
+type Tab = "publisher" | "conductor" | "admin" | "cart";
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -46,8 +47,8 @@ export default function App() {
 
   // 역할이 바뀌면(다른 아이디로 로그인) 허용되지 않은 탭에 남지 않도록 초기화
   useEffect(() => {
-    setTab("publisher");
-  }, [session?.user.email]);
+    setTab(role === "cart" ? "cart" : "publisher");
+  }, [session?.user.email, role]);
 
   function changeFont(delta: number) {
     const next = Math.min(7, Math.max(1, fontLevel + delta));
@@ -103,6 +104,7 @@ export default function App() {
 
   const showConductor = role === "conductor" || role === "admin";
   const showAdmin = role === "admin";
+  const isCart = role === "cart";
 
   return (
     <>
@@ -116,9 +118,16 @@ export default function App() {
         {clockWarning && (
           <div className="error-msg" style={{ whiteSpace: "pre-line" }}>{clockWarning}</div>
         )}
-        {tab === "publisher" && <PublisherScreen />}
-        {tab === "conductor" && showConductor && <ConductorScreen isAdmin={showAdmin} />}
-        {tab === "admin" && showAdmin && <AdminScreen />}
+        {isCart ? (
+          <CartScreen />
+        ) : (
+          <>
+            {tab === "publisher" && <PublisherScreen />}
+            {tab === "conductor" && showConductor && <ConductorScreen isAdmin={showAdmin} />}
+            {tab === "admin" && showAdmin && <AdminScreen />}
+            {tab === "cart" && showAdmin && <CartScreen isAdmin={showAdmin} />}
+          </>
+        )}
       </main>
 
       {(showConductor || showAdmin) && (
@@ -135,6 +144,14 @@ export default function App() {
               onClick={() => setTab("conductor")}
             >
               인도자
+            </button>
+          )}
+          {showAdmin && (
+            <button
+              className={tab === "cart" ? "active" : ""}
+              onClick={() => setTab("cart")}
+            >
+              전시대
             </button>
           )}
           {showAdmin && (
