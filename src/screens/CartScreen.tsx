@@ -177,8 +177,9 @@ export default function CartScreen({
 
   // 신청 불가 시간 안내 팝업 모달
   const [popupMessage, setPopupMessage] = useState<string | null>(null);
-  // 신청 취소 확인 팝업 모달 대상 및 취소 사유 상태
+  // 신청 취소 확인 팝업 모달 대상, 단계(1단계: 본인 확인 / 2단계: 사유 선택) 및 취소 사유 상태
   const [confirmCancelApp, setConfirmCancelApp] = useState<CartApplication | null>(null);
+  const [cancelStep, setCancelStep] = useState<1 | 2>(1);
   const [cancelReasonChoice, setCancelReasonChoice] = useState<string>(CANCEL_REASON_PRESETS[0]);
   const [cancelReasonCustom, setCancelReasonCustom] = useState<string>("");
 
@@ -350,6 +351,7 @@ export default function CartScreen({
         return;
       }
     }
+    setCancelStep(1);
     setCancelReasonChoice(CANCEL_REASON_PRESETS[0]);
     setCancelReasonCustom("");
     setConfirmCancelApp(app);
@@ -480,79 +482,112 @@ export default function CartScreen({
     </div>
   );
 
-  // 신청 취소 재확인 및 사유 선택 팝업 모달
+  // 신청 취소 2단계 팝업 모달 (1단계: 취소 대상 이름 확인 -> 2단계: 취소 사유 선택 및 직접 입력)
   const cancelConfirmModal = confirmCancelApp && (
     <div className="modal-back" onClick={() => setConfirmCancelApp(null)}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>⚠ 전시대 신청 취소 확인</h3>
-        <div
-          className="notice"
-          style={{ lineHeight: 1.6, fontSize: "var(--fs-base)", marginBottom: 12 }}
-        >
-          정말 <b style={{ color: "var(--c-danger)" }}>'{confirmCancelApp.publisher_name}'</b> 전도인의 전시대 신청을 취소하는 것이 맞습니까?
-        </div>
-
-        <div className="field" style={{ marginBottom: 12 }}>
-          <label>취소 사유 선택</label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {CANCEL_REASON_PRESETS.map((reason) => (
-              <button
-                key={reason}
-                type="button"
-                className={`choice-btn ${cancelReasonChoice === reason ? "selected" : ""}`}
-                onClick={() => setCancelReasonChoice(reason)}
-                style={{ textAlign: "left" }}
-              >
-                {cancelReasonChoice === reason ? "✓ " : ""}
-                {reason}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={`choice-btn ${cancelReasonChoice === "custom" ? "selected" : ""}`}
-              onClick={() => setCancelReasonChoice("custom")}
-              style={{ textAlign: "left" }}
+        {cancelStep === 1 ? (
+          <>
+            <h3>⚠ 전시대 신청 취소 확인 (1/2)</h3>
+            <div
+              className="notice"
+              style={{ lineHeight: 1.6, fontSize: "var(--fs-base)", marginBottom: 14 }}
             >
-              {cancelReasonChoice === "custom" ? "✓ " : ""}
-              직접 입력
-            </button>
-          </div>
-          {cancelReasonChoice === "custom" && (
-            <input
-              type="text"
-              value={cancelReasonCustom}
-              onChange={(e) => setCancelReasonCustom(e.target.value)}
-              placeholder="취소 사유를 직접 입력해 주세요"
-              autoFocus
-              style={{ marginTop: 8 }}
-            />
-          )}
-        </div>
+              정말 <b style={{ color: "var(--c-danger)" }}>'{confirmCancelApp.publisher_name}'</b> 전도인의 전시대 신청을 취소하는 것이 맞습니까?
+              <div className="muted" style={{ marginTop: 6, fontSize: "var(--fs-small)" }}>
+                본인이 맞으시면 [예, 맞습니다]를 눌러 다음 단계에서 취소 사유를 선택해 주세요.
+              </div>
+            </div>
+            <div className="row">
+              <button
+                type="button"
+                className="btn-danger"
+                style={{ flex: 1 }}
+                disabled={busy}
+                onClick={() => setCancelStep(2)}
+              >
+                예, 맞습니다 →
+              </button>
+              <button
+                type="button"
+                className="btn-line"
+                style={{ flex: 1 }}
+                disabled={busy}
+                onClick={() => setConfirmCancelApp(null)}
+              >
+                아니오 (닫기)
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h3>📝 취소 사유 선택 (2/2)</h3>
+            <div className="muted" style={{ marginBottom: 10, fontSize: "var(--fs-small)" }}>
+              <b>'{confirmCancelApp.publisher_name}'</b> 전도인의 신청 취소 사유를 선택해 주세요.
+            </div>
 
-        <div className="muted" style={{ marginBottom: 12, fontSize: "var(--fs-small)" }}>
-          취소하면 삭제되지 않고 아래 '신청 취소자' 명단으로 이동되며, 언제든 다시 신청(복구)할 수 있습니다.
-        </div>
+            <div className="field" style={{ marginBottom: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {CANCEL_REASON_PRESETS.map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    className={`choice-btn ${cancelReasonChoice === reason ? "selected" : ""}`}
+                    onClick={() => setCancelReasonChoice(reason)}
+                    style={{ textAlign: "left" }}
+                  >
+                    {cancelReasonChoice === reason ? "✓ " : ""}
+                    {reason}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={`choice-btn ${cancelReasonChoice === "custom" ? "selected" : ""}`}
+                  onClick={() => setCancelReasonChoice("custom")}
+                  style={{ textAlign: "left" }}
+                >
+                  {cancelReasonChoice === "custom" ? "✓ " : ""}
+                  직접 입력
+                </button>
+              </div>
+              {cancelReasonChoice === "custom" && (
+                <input
+                  type="text"
+                  value={cancelReasonCustom}
+                  onChange={(e) => setCancelReasonCustom(e.target.value)}
+                  placeholder="취소 사유를 직접 입력해 주세요"
+                  autoFocus
+                  style={{ marginTop: 8 }}
+                />
+              )}
+            </div>
 
-        <div className="row">
-          <button
-            type="button"
-            className="btn-danger"
-            style={{ flex: 1 }}
-            disabled={busy || (cancelReasonChoice === "custom" && !cancelReasonCustom.trim())}
-            onClick={executeCancel}
-          >
-            예, 취소합니다
-          </button>
-          <button
-            type="button"
-            className="btn-line"
-            style={{ flex: 1 }}
-            disabled={busy}
-            onClick={() => setConfirmCancelApp(null)}
-          >
-            아니오 (유지)
-          </button>
-        </div>
+            <div className="muted" style={{ marginBottom: 12, fontSize: "var(--fs-small)" }}>
+              취소하면 삭제되지 않고 아래 '신청 취소자' 명단으로 이동되며, 언제든 다시 신청(복구)할 수 있습니다.
+            </div>
+
+            <div className="row">
+              <button
+                type="button"
+                className="btn-danger"
+                style={{ flex: 1 }}
+                disabled={busy || (cancelReasonChoice === "custom" && !cancelReasonCustom.trim())}
+                onClick={executeCancel}
+              >
+                취소 완료
+              </button>
+              <button
+                type="button"
+                className="btn-line"
+                style={{ flex: 1 }}
+                disabled={busy}
+                onClick={() => setConfirmCancelApp(null)}
+              >
+                닫기 (유지)
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
