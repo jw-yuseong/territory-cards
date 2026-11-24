@@ -332,7 +332,7 @@ export default function CartTeamPlanner({
       }
       await onReload();
       setIsDirty(false);
-      setMsg("전시대 조 편성이 저장되었습니다! (전시대 계정에는 해당 봉사모임 시간에 자동 공개됩니다)");
+      setMsg("전시대 조 편성이 저장되었습니다! (전시대 계정에는 봉사 시작 15분 전에 자동 공개됩니다)");
     } catch (e) {
       setError(friendlyError(e));
     }

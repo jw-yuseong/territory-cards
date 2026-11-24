@@ -144,7 +144,9 @@ function checkApplicationWindow(
 }
 
 /**
- * 전시대 계정(일반 전도인)에서 조 배정 결과를 볼 수 있는 공개 시각(봉사모임 시각, 없으면 시작 시각) 계산
+ * 전시대 계정(일반 전도인)에서 조 배정 결과를 볼 수 있는 공개 시각 계산:
+ * - 봉사모임 시간이 적혀 있으면 해당 봉사모임 시각
+ * - 봉사모임이 없는 경우(또는 시간 미기재 시)에도 전시대 시작 15분 전에 공개
  */
 function getTeamPlanRevealTime(
   serviceDateYmd: string,
@@ -155,8 +157,9 @@ function getTeamPlanRevealTime(
     .split(":")
     .map((v) => Number(v) || 0);
 
-  let revealH = startH;
-  let revealM = startM;
+  const startAt = new Date(y, m - 1, d, startH, startM, 0, 0);
+  // 기본값: 전시대 시작 15분 전
+  let revealAt = new Date(startAt.getTime() - 15 * 60 * 1000);
 
   const note = (schedule.meeting_note || "").trim();
   // '봉사모임 없음'이 아니고 시간 표현(예: '5시45분', '오후 3시 30분', '17:45')이 있으면 파싱
@@ -178,12 +181,12 @@ function getTeamPlanRevealTime(
           h += 12;
         }
       }
-      revealH = h;
-      revealM = min;
+      revealAt = new Date(y, m - 1, d, h, min, 0, 0);
     }
   }
 
-  const revealAt = new Date(y, m - 1, d, revealH, revealM, 0, 0);
+  const revealH = revealAt.getHours();
+  const revealM = revealAt.getMinutes();
   const periodLabel = revealH < 12 ? "오전" : "오후";
   const h12 = revealH % 12 === 0 ? 12 : revealH % 12;
   const revealLabel = `${periodLabel} ${h12}시${revealM > 0 ? ` ${revealM}분` : ""}`;
