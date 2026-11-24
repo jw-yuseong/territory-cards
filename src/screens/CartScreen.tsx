@@ -143,6 +143,53 @@ function checkApplicationWindow(
   return { allowed: true, status: "open", openAtStr, closeAtStr };
 }
 
+/**
+ * 전시대 계정(일반 전도인)에서 조 배정 결과를 볼 수 있는 공개 시각(봉사모임 시각, 없으면 시작 시각) 계산
+ */
+function getTeamPlanRevealTime(
+  serviceDateYmd: string,
+  schedule: CartSchedule
+): { revealAt: Date; revealLabel: string } {
+  const [y, m, d] = serviceDateYmd.split("-").map(Number);
+  const [startH, startM] = (schedule.start_time || "00:00")
+    .split(":")
+    .map((v) => Number(v) || 0);
+
+  let revealH = startH;
+  let revealM = startM;
+
+  const note = (schedule.meeting_note || "").trim();
+  // '봉사모임 없음'이 아니고 시간 표현(예: '5시45분', '오후 3시 30분', '17:45')이 있으면 파싱
+  if (note && !note.includes("없음")) {
+    const korMatch = note.match(/(오전|오후)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분)?/);
+    const colonMatch = note.match(/(오전|오후)?\s*(\d{1,2})\s*:\s*(\d{2})/);
+    const match = korMatch ?? colonMatch;
+    if (match) {
+      const period = match[1];
+      let h = Number(match[2]);
+      const min = match[3] ? Number(match[3]) : 0;
+      if (period === "오후" && h < 12) {
+        h += 12;
+      } else if (period === "오전" && h === 12) {
+        h = 0;
+      } else if (!period && h >= 1 && h <= 11 && startH >= 12) {
+        // 시작 시각이 오후(12시 이후)인데 모임 시각에 오전/오후가 생략된 경우 (예: start 18:00, 모임 5시45분 -> 17:45)
+        if (h + 12 <= startH) {
+          h += 12;
+        }
+      }
+      revealH = h;
+      revealM = min;
+    }
+  }
+
+  const revealAt = new Date(y, m - 1, d, revealH, revealM, 0, 0);
+  const periodLabel = revealH < 12 ? "오전" : "오후";
+  const h12 = revealH % 12 === 0 ? 12 : revealH % 12;
+  const revealLabel = `${periodLabel} ${h12}시${revealM > 0 ? ` ${revealM}분` : ""}`;
+  return { revealAt, revealLabel };
+}
+
 const CANCEL_REASON_PRESETS = [
   "건강 / 컨디션 문제",
   "직장 / 학업 / 가족 일정",
@@ -634,6 +681,8 @@ export default function CartScreen({
     const alreadyAppliedApp = activeSlotApps.find((a) => a.publisher_id === selectedPubId);
     const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, now);
     const formattedPlans = getFormattedPlansForSlot(selectedSchedule.id, serviceDate);
+    const revealInfo = getTeamPlanRevealTime(serviceDate, selectedSchedule);
+    const isPlanVisible = canPlanTeams || now.getTime() >= revealInfo.revealAt.getTime();
 
     return (
       <div>
@@ -672,8 +721,8 @@ export default function CartScreen({
           </div>
         </div>
 
-        {/* 편성된 조 현황이 있으면 신청 화면 상단에도 표시 */}
-        {formattedPlans.length > 0 && (
+        {/* 편성된 조 현황: 인도자/관리자는 항상 표시, 전시대 계정은 봉사모임 시간부터 공개 */}
+        {formattedPlans.length > 0 && isPlanVisible && (
           <div
             className="card-box"
             style={{
@@ -692,6 +741,11 @@ export default function CartScreen({
             >
               <span style={{ fontWeight: 700, fontSize: "var(--fs-small)", color: "#166534" }}>
                 📍 편성된 전시대 조 현황
+                {canPlanTeams && now.getTime() < revealInfo.revealAt.getTime() && (
+                  <span style={{ fontWeight: 400, marginLeft: 6, color: "#15803d" }}>
+                    (전시대 계정에는 {revealInfo.revealLabel}부터 공개됨)
+                  </span>
+                )}
               </span>
               <button
                 type="button"
@@ -1010,6 +1064,8 @@ export default function CartScreen({
           const slotApps = allSlotApps.filter((a) => !a.is_cancelled);
           const cancelledApps = allSlotApps.filter((a) => a.is_cancelled);
           const formattedPlans = getFormattedPlansForSlot(s.id, serviceDate);
+          const revealInfo = getTeamPlanRevealTime(serviceDate, s);
+          const isPlanVisible = canPlanTeams || now.getTime() >= revealInfo.revealAt.getTime();
 
           return (
             <div
@@ -1140,8 +1196,8 @@ export default function CartScreen({
                 )}
               </div>
 
-              {/* 편성된 전시대 조 현황 표시 (전시대 계정 & 인도자 계정 공통) */}
-              {formattedPlans.length > 0 && (
+              {/* 편성된 전시대 조 현황 표시 (인도자/관리자는 항상 표시, 전시대 계정은 봉사모임 시간부터 공개) */}
+              {formattedPlans.length > 0 && isPlanVisible && (
                 <div
                   style={{
                     marginTop: 10,
@@ -1160,6 +1216,11 @@ export default function CartScreen({
                   >
                     <span style={{ fontWeight: 700, color: "#166534" }}>
                       📍 편성된 전시대 조
+                      {canPlanTeams && now.getTime() < revealInfo.revealAt.getTime() && (
+                        <span style={{ fontWeight: 400, marginLeft: 6, color: "#15803d", fontSize: 12 }}>
+                          (전시대 계정에는 {revealInfo.revealLabel}에 공개)
+                        </span>
+                      )}
                     </span>
                     <button
                       type="button"
