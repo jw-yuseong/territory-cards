@@ -88,6 +88,41 @@ export function buildTeamSummaryText(
   return lines.join("\n");
 }
 
+function buildInitialDraftByLoc(
+  locations: CartLocation[],
+  existingPlans: CartTeamPlan[],
+  scheduleId: string,
+  serviceDate: string
+): Record<string, LocationDraft> {
+  const next: Record<string, LocationDraft> = {};
+  const hasAnySaved = existingPlans.some(
+    (p) => p.schedule_id === scheduleId && p.service_date === serviceDate
+  );
+  locations.forEach((loc, idx) => {
+    const found = existingPlans.find(
+      (p) =>
+        p.schedule_id === scheduleId &&
+        p.service_date === serviceDate &&
+        p.location_id === loc.id
+    );
+    if (found) {
+      next[loc.id] = {
+        enabled: true,
+        teamCount: found.team_count >= 2 && found.team_count <= 4 ? found.team_count : 2,
+        teams: normalizeLoadedTeams(found.teams),
+      };
+    } else {
+      // 아직 저장된 계획이 전혀 없으면 첫 번째 장소는 기본 2조로 열어둠
+      next[loc.id] = {
+        enabled: !hasAnySaved && idx === 0,
+        teamCount: 2,
+        teams: makeEmptyTeams(),
+      };
+    }
+  });
+  return next;
+}
+
 export default function CartTeamPlanner({
   schedule,
   serviceDate,
@@ -113,7 +148,11 @@ export default function CartTeamPlanner({
   onReload: () => Promise<void>;
   onSwitchToApplyView: () => void;
 }) {
-  const [draftByLoc, setDraftByLoc] = useState<Record<string, LocationDraft>>({});
+  const [draftByLoc, setDraftByLoc] = useState<Record<string, LocationDraft>>(() =>
+    buildInitialDraftByLoc(locations, existingPlans, schedule.id, serviceDate)
+  );
+  // 사용자가 화면에서 조 개수(2·3·4조)나 배정을 건드렸는지 여부 (편집 중 자동 리셋 원천 방지)
+  const [isDirty, setIsDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -126,36 +165,25 @@ export default function CartTeamPlanner({
     memberIdx: number;
   } | null>(null);
 
-  // 초기 로드 및 existingPlans 반영
+  // 저장된 계획의 실제 내용이 바뀌었을 때만(그리고 사용자가 편집 중이 아닐 때만) draft 동기화
+  const existingPlansKey = useMemo(
+    () =>
+      JSON.stringify(
+        existingPlans.map((p) => ({
+          l: p.location_id,
+          c: p.team_count,
+          t: p.teams,
+        }))
+      ),
+    [existingPlans]
+  );
+  const locationsKey = useMemo(() => locations.map((l) => l.id).join(","), [locations]);
+
   useEffect(() => {
-    const next: Record<string, LocationDraft> = {};
-    locations.forEach((loc, idx) => {
-      const found = existingPlans.find(
-        (p) =>
-          p.schedule_id === schedule.id &&
-          p.service_date === serviceDate &&
-          p.location_id === loc.id
-      );
-      if (found) {
-        next[loc.id] = {
-          enabled: true,
-          teamCount: found.team_count >= 2 && found.team_count <= 4 ? found.team_count : 2,
-          teams: normalizeLoadedTeams(found.teams),
-        };
-      } else {
-        // 아직 저장된 계획이 전혀 없으면 첫 번째 장소는 기본 2조로 열어둠
-        const hasAnySaved = existingPlans.some(
-          (p) => p.schedule_id === schedule.id && p.service_date === serviceDate
-        );
-        next[loc.id] = {
-          enabled: !hasAnySaved && idx === 0,
-          teamCount: 2,
-          teams: makeEmptyTeams(),
-        };
-      }
-    });
-    setDraftByLoc(next);
-  }, [locations, existingPlans, schedule.id, serviceDate]);
+    if (isDirty) return;
+    setDraftByLoc(buildInitialDraftByLoc(locations, existingPlans, schedule.id, serviceDate));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationsKey, existingPlansKey, schedule.id, serviceDate, isDirty]);
 
   // 현재 모든 활성 장소·조에 배치된 전도인 이름과 위치 매핑
   const assignedMap = useMemo(() => {
@@ -204,6 +232,7 @@ export default function CartTeamPlanner({
   }, [allRecentPlans, threeMonthsAgoYmd, schedule.id, serviceDate, assignedMap]);
 
   function setLocationMode(locationId: string, mode: "off" | 2 | 3 | 4) {
+    setIsDirty(true);
     setDraftByLoc((prev) => {
       const cur = prev[locationId] ?? {
         enabled: false,
@@ -226,6 +255,7 @@ export default function CartTeamPlanner({
   }
 
   function toggleThirdMemberSlot(locationId: string, teamIdx: number, enableThird: boolean) {
+    setIsDirty(true);
     setDraftByLoc((prev) => {
       const cur = prev[locationId];
       if (!cur) return prev;
@@ -250,6 +280,7 @@ export default function CartTeamPlanner({
     memberIdx: number,
     publisherName: string
   ) {
+    setIsDirty(true);
     setDraftByLoc((prev) => {
       const cur = prev[locationId];
       if (!cur) return prev;
@@ -274,16 +305,23 @@ export default function CartTeamPlanner({
     setMsg("");
     try {
       for (const loc of locations) {
+        if (loc.id.startsWith("default-loc-")) {
+          throw new Error(
+            "전시대 장소 테이블이 아직 DB에 준비되지 않았습니다. 관리자에게 patch20 SQL 실행을 요청해 주세요."
+          );
+        }
         const d = draftByLoc[loc.id];
         if (!d || !d.enabled) {
           await deleteCartTeamPlan(schedule.id, serviceDate, loc.id);
           continue;
         }
-        const cleanedTeams = d.teams.slice(0, d.teamCount).map((arr) =>
-          arr.length >= 3
+        const cleanedTeams = Array.from({ length: 4 }, (_, idx) => {
+          const arr = d.teams[idx] ?? ["", ""];
+          if (idx >= d.teamCount) return ["", ""];
+          return arr.length >= 3
             ? [arr[0]?.trim() ?? "", arr[1]?.trim() ?? "", arr[2]?.trim() ?? ""]
-            : [arr[0]?.trim() ?? "", arr[1]?.trim() ?? ""]
-        );
+            : [arr[0]?.trim() ?? "", arr[1]?.trim() ?? ""];
+        });
         await upsertCartTeamPlan({
           schedule_id: schedule.id,
           service_date: serviceDate,
@@ -293,6 +331,7 @@ export default function CartTeamPlanner({
         });
       }
       await onReload();
+      setIsDirty(false);
       setMsg("전시대 조 편성이 저장되었습니다! (전시대 계정 화면에도 반영됨)");
     } catch (e) {
       setError(friendlyError(e));

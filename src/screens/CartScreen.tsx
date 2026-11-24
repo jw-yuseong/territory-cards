@@ -169,8 +169,9 @@ export default function CartScreen({
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
 
-  // 선택한 전시대 일정 및 화면 모드 ('plan' = 인도자 조 편성, 'apply' = 전도인 신청)
+  // 선택한 전시대 일정 및 고정 날짜, 화면 모드 ('plan' = 인도자 조 편성, 'apply' = 전도인 신청)
   const [selectedSchedule, setSelectedSchedule] = useState<CartSchedule | null>(null);
+  const [selectedServiceDate, setSelectedServiceDate] = useState<string>("");
   const [detailMode, setDetailMode] = useState<"plan" | "apply">("apply");
   // 구역관리자일 때 전시대 설정 화면으로 전환
   const [showAdminConfig, setShowAdminConfig] = useState(false);
@@ -263,6 +264,7 @@ export default function CartScreen({
   useEffect(() => {
     function onPop() {
       setSelectedSchedule(null);
+      setSelectedServiceDate("");
       setError("");
       setMsg("");
     }
@@ -286,6 +288,7 @@ export default function CartScreen({
       setMsg("");
       setSearchPub("");
       setDetailMode("plan");
+      setSelectedServiceDate(serviceDate);
       setSelectedSchedule(s);
       window.history.pushState({ cartDetail: true }, "");
       return;
@@ -300,6 +303,7 @@ export default function CartScreen({
     setMsg("");
     setSearchPub("");
     setDetailMode("apply");
+    setSelectedServiceDate(serviceDate);
     setSelectedSchedule(s);
     window.history.pushState({ cartDetail: true }, "");
   }
@@ -309,6 +313,7 @@ export default function CartScreen({
       window.history.back();
     } else {
       setSelectedSchedule(null);
+      setSelectedServiceDate("");
       setError("");
       setMsg("");
     }
@@ -316,7 +321,7 @@ export default function CartScreen({
 
   async function handleApply() {
     if (!selectedSchedule || !selectedPubId) return;
-    const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
+    const serviceDate = selectedServiceDate || getUpcomingServiceDate(selectedSchedule, new Date());
     if (!canPlanTeams) {
       const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
       if (!win.allowed) {
@@ -343,7 +348,7 @@ export default function CartScreen({
 
   function requestCancel(app: CartApplication) {
     if (!selectedSchedule) return;
-    const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
+    const serviceDate = selectedServiceDate || getUpcomingServiceDate(selectedSchedule, new Date());
     if (!canPlanTeams) {
       const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
       if (!win.allowed) {
@@ -385,7 +390,7 @@ export default function CartScreen({
 
   async function handleRestoreCancelled(app: CartApplication) {
     if (!selectedSchedule) return;
-    const serviceDate = getUpcomingServiceDate(selectedSchedule, new Date());
+    const serviceDate = selectedServiceDate || getUpcomingServiceDate(selectedSchedule, new Date());
     if (!canPlanTeams) {
       const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
       if (!win.allowed) {
@@ -594,7 +599,7 @@ export default function CartScreen({
 
   // 2) 일정을 선택했을 때: 인도자 조 편성 화면('plan') 또는 전시대 신청 화면('apply')
   if (selectedSchedule) {
-    const serviceDate = getUpcomingServiceDate(selectedSchedule, now);
+    const serviceDate = selectedServiceDate || getUpcomingServiceDate(selectedSchedule, now);
     const allSlotApps = applications.filter(
       (a) => a.schedule_id === selectedSchedule.id && a.service_date === serviceDate
     );
@@ -607,6 +612,7 @@ export default function CartScreen({
     if (canPlanTeams && detailMode === "plan") {
       return (
         <CartTeamPlanner
+          key={`${selectedSchedule.id}-${serviceDate}`}
           schedule={selectedSchedule}
           serviceDate={serviceDate}
           locations={locations}
