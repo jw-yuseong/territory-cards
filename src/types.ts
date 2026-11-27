@@ -218,9 +218,11 @@ export interface CartLocation {
 
 export interface CartTeamPlan {
   id: string;
-  schedule_id: string;
+  schedule_id: string | null;
   service_date: string; // 'YYYY-MM-DD'
-  location_id: string;
+  location_id: string | null;
+  schedule_label?: string | null;
+  location_name?: string | null;
   team_count: number; // 2 ~ 4
   teams: string[][]; // 각 조의 전도인 이름 배열 (2명 또는 3명)
   updated_at: string;

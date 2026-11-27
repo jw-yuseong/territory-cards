@@ -1122,7 +1122,12 @@ export async function updateCartSchedule(
 }
 
 export async function deleteCartSchedule(id: string): Promise<void> {
-  const { error } = await supabase.from("cart_schedules").delete().eq("id", id);
+  // 과거 전시대 조 편성 기록(3개월 참여 횟수)을 영구 보존하기 위해
+  // 물리 삭제 대신 비활성화(is_active = false)로 처리한다.
+  const { error } = await supabase
+    .from("cart_schedules")
+    .update({ is_active: false })
+    .eq("id", id);
   if (error) throw new Error(error.message);
 }
 
@@ -1420,7 +1425,12 @@ export async function updateCartLocation(id: string, name: string): Promise<void
 }
 
 export async function deleteCartLocation(id: string): Promise<void> {
-  const { error } = await supabase.from("cart_locations").delete().eq("id", id);
+  // 과거 전시대 조 편성 기록(3개월 참여 횟수)을 영구 보존하기 위해
+  // 물리 삭제 대신 비활성화(is_active = false)로 처리한다.
+  const { error } = await supabase
+    .from("cart_locations")
+    .update({ is_active: false })
+    .eq("id", id);
   if (error) throw new Error(error.message);
 }
 
@@ -1428,29 +1438,74 @@ export async function fetchCartTeamPlans(
   startDate: string,
   endDate: string
 ): Promise<CartTeamPlan[]> {
-  const { data, error } = await supabase
-    .from("cart_team_plans")
-    .select("id, schedule_id, service_date, location_id, team_count, teams, updated_at")
-    .gte("service_date", startDate)
-    .lte("service_date", endDate);
-  if (error) {
-    console.warn("fetchCartTeamPlans failed (patch20 may not be applied yet):", error);
-    return [];
+  // 1차: 스냅샷 컬럼(schedule_label, location_name) 포함 조회 (1000행 페이지 처리)
+  const all: CartTeamPlan[] = [];
+  let from = 0;
+  let useLegacySelect = false;
+
+  for (;;) {
+    const selectCols = useLegacySelect
+      ? "id, schedule_id, service_date, location_id, team_count, teams, updated_at"
+      : "id, schedule_id, service_date, location_id, schedule_label, location_name, team_count, teams, updated_at";
+
+    const { data, error } = await supabase
+      .from("cart_team_plans")
+      .select(selectCols)
+      .gte("service_date", startDate)
+      .lte("service_date", endDate)
+      .order("service_date")
+      .range(from, from + 999);
+
+    if (error) {
+      if (!useLegacySelect && from === 0) {
+        // patch22 적용 전이면 스냅샷 컬럼 없이 다시 조회
+        useLegacySelect = true;
+        continue;
+      }
+      console.warn("fetchCartTeamPlans failed (patch20 may not be applied yet):", error);
+      return all;
+    }
+
+    const chunk = ((data ?? []) as unknown as CartTeamPlan[]).map((row) => ({
+      ...row,
+      teams: Array.isArray(row.teams) ? row.teams : [],
+    }));
+    all.push(...chunk);
+    if (chunk.length < 1000) break;
+    from += 1000;
   }
-  return ((data ?? []) as CartTeamPlan[]).map((row) => ({
-    ...row,
-    teams: Array.isArray(row.teams) ? row.teams : [],
-  }));
+
+  return all;
 }
 
 export async function upsertCartTeamPlan(input: {
   schedule_id: string;
   service_date: string;
   location_id: string;
+  schedule_label?: string;
+  location_name?: string;
   team_count: number;
   teams: string[][];
 }): Promise<void> {
-  const { error } = await supabase.from("cart_team_plans").upsert(
+  const payloadWithSnapshot = {
+    schedule_id: input.schedule_id,
+    service_date: input.service_date,
+    location_id: input.location_id,
+    schedule_label: input.schedule_label ?? null,
+    location_name: input.location_name ?? null,
+    team_count: input.team_count,
+    teams: input.teams,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase
+    .from("cart_team_plans")
+    .upsert(payloadWithSnapshot, { onConflict: "schedule_id,service_date,location_id" });
+
+  if (!error) return;
+
+  // patch22 SQL 적용 전(스냅샷 컬럼 없음) 폴백
+  const { error: fbErr } = await supabase.from("cart_team_plans").upsert(
     {
       schedule_id: input.schedule_id,
       service_date: input.service_date,
@@ -1461,7 +1516,7 @@ export async function upsertCartTeamPlan(input: {
     },
     { onConflict: "schedule_id,service_date,location_id" }
   );
-  if (error) throw new Error(error.message);
+  if (fbErr) throw new Error(fbErr.message || error.message);
 }
 
 export async function deleteCartTeamPlan(

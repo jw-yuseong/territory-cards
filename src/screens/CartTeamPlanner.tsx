@@ -326,6 +326,8 @@ export default function CartTeamPlanner({
           schedule_id: schedule.id,
           service_date: serviceDate,
           location_id: loc.id,
+          schedule_label: formatScheduleFullTitle(schedule),
+          location_name: loc.name,
           team_count: d.teamCount,
           teams: cleanedTeams,
         });

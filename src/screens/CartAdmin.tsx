@@ -168,7 +168,11 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
 
   async function removeSchedule(s: CartSchedule) {
     const title = formatScheduleFullTitle(s);
-    if (!window.confirm(`'${title}' 일정을 삭제할까요?\n(해당 시간대의 신청 기록도 함께 삭제됩니다.)`)) {
+    if (
+      !window.confirm(
+        `'${title}' 일정을 목록에서 삭제할까요?\n(과거 3개월 전시대 참여 횟수 기록은 안전하게 보존됩니다.)`
+      )
+    ) {
       return;
     }
     setBusy(true);
