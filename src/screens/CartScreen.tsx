@@ -16,6 +16,7 @@ import type {
   CartTeamPlan,
 } from "../types";
 import { friendlyError } from "../errors";
+import { isAuthTokenError, tryRecoverSession } from "../supabase";
 import { matchName } from "../chosung";
 import CartAdmin, { DAY_NAMES, formatScheduleFullTitle } from "./CartAdmin";
 import CartTeamPlanner, { buildTeamSummaryText } from "./CartTeamPlanner";
@@ -284,7 +285,7 @@ export default function CartScreen({
       });
   }, [schedules, now]);
 
-  async function loadAll() {
+  async function loadAll(retried = false) {
     try {
       const [sc, locs, ps, apps, plans] = await Promise.all([
         fetchCartSchedules(),
@@ -298,7 +299,14 @@ export default function CartScreen({
       setPublishers(ps);
       setApplications(apps);
       setTeamPlans(plans);
+      setError("");
     } catch (e) {
+      if (!retried && isAuthTokenError(e)) {
+        const recovered = await tryRecoverSession();
+        if (recovered) {
+          return loadAll(true);
+        }
+      }
       setError(friendlyError(e));
     }
     setLoading(false);

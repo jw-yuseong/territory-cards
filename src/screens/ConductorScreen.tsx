@@ -13,6 +13,7 @@ import {
   roundVisited,
 } from "../types";
 import { friendlyError } from "../errors";
+import { isAuthTokenError, tryRecoverSession } from "../supabase";
 import { matchName } from "../chosung";
 import LetterMinistry from "./LetterMinistry";
 
@@ -46,7 +47,7 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
   const [showAllRemain, setShowAllRemain] = useState(false);
   const [showAllTable, setShowAllTable] = useState(false);
 
-  async function load() {
+  async function load(retried = false) {
     try {
       const [pr, cs, ps, inc] = await Promise.all([
         fetchCardProgress(),
@@ -63,7 +64,14 @@ export default function ConductorScreen({ isAdmin = false }: { isAdmin?: boolean
         incMap.set(note.card_id, note);
       }
       setIncompleteNotes(incMap);
+      setError("");
     } catch (e) {
+      if (!retried && isAuthTokenError(e)) {
+        const recovered = await tryRecoverSession();
+        if (recovered) {
+          return load(true);
+        }
+      }
       setError(friendlyError(e));
     }
     setLoading(false);

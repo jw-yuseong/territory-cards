@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
-import { supabase } from "./supabase";
+import { supabase, tryRecoverSession } from "./supabase";
 import { CONFIG_OK, EMAIL_TO_ROLE, Role } from "./config";
-import { checkClockSkew, clockSkewMessage, SKEW_WARN_SECONDS } from "./errors";
 import Login from "./screens/Login";
 import PublisherScreen from "./screens/PublisherScreen";
 import ConductorScreen from "./screens/ConductorScreen";
@@ -21,26 +20,49 @@ export default function App() {
     return localStorage.getItem("fontMode") === "big" ? 4 : 2;
   });
 
-  const [clockWarning, setClockWarning] = useState<string | null>(null);
-
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setSessionReady(true);
-    });
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
-      setSession(s);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
+    let active = true;
 
-  // 앱을 켤 때 기기 시계와 서버 시계 차이를 미리 확인해, 문제가 생기기 전에 경고
-  useEffect(() => {
-    checkClockSkew().then((skew) => {
-      if (skew !== null && Math.abs(skew) >= SKEW_WARN_SECONDS) {
-        setClockWarning(clockSkewMessage(skew));
+    async function initSession() {
+      const { data } = await supabase.auth.getSession();
+      if (!active) return;
+
+      if (data.session) {
+        // 기존 세션이 만료되었거나 곧 만료될 경우 미리 조용히 갱신 시도
+        const expMs = (data.session.expires_at ?? 0) * 1000;
+        if (expMs > 0 && expMs - Date.now() < 60 * 1000) {
+          const recovered = await tryRecoverSession();
+          if (!active) return;
+          if (recovered) {
+            const { data: latest } = await supabase.auth.getSession();
+            if (!active) return;
+            setSession(latest.session);
+            setSessionReady(true);
+            return;
+          }
+          // 갱신도 실패하면 만료된 세션을 정리해 깨끗하게 로그인 화면으로 이동
+          await supabase.auth.signOut().catch(() => {});
+          if (!active) return;
+          setSession(null);
+          setSessionReady(true);
+          return;
+        }
+        setSession(data.session);
+      } else {
+        setSession(null);
       }
+      setSessionReady(true);
+    }
+
+    initSession();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      if (active) setSession(s);
     });
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   const role: Role = EMAIL_TO_ROLE[session?.user.email ?? ""] ?? "publisher";
@@ -92,11 +114,6 @@ export default function App() {
           <h1>구역카드</h1>
           {fontButtons}
         </header>
-        {clockWarning && (
-          <div className="screen" style={{ paddingBottom: 0 }}>
-            <div className="error-msg" style={{ whiteSpace: "pre-line" }}>{clockWarning}</div>
-          </div>
-        )}
         <Login />
       </>
     );
@@ -115,9 +132,6 @@ export default function App() {
       </header>
 
       <main className="screen">
-        {clockWarning && (
-          <div className="error-msg" style={{ whiteSpace: "pre-line" }}>{clockWarning}</div>
-        )}
         {isCart ? (
           <CartScreen />
         ) : (

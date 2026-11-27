@@ -13,6 +13,7 @@ import {
 } from "../types";
 import CardDetail from "./CardDetail";
 import { friendlyError } from "../errors";
+import { isAuthTokenError, tryRecoverSession } from "../supabase";
 import { hapticTap } from "../haptics";
 
 export default function PublisherScreen() {
@@ -50,8 +51,13 @@ export default function PublisherScreen() {
   }
 
   useEffect(() => {
-    Promise.all([getCardSummaries(), fetchCardProgress(), fetchIncompleteNotes()])
-      .then(([cs, pr, inc]) => {
+    async function load(retried = false) {
+      try {
+        const [cs, pr, inc] = await Promise.all([
+          getCardSummaries(),
+          fetchCardProgress(),
+          fetchIncompleteNotes(),
+        ]);
         setCards(cs);
         setProgressMap(new Map(pr.map((p) => [p.card_id, p])));
 
@@ -61,9 +67,19 @@ export default function PublisherScreen() {
           incMap.set(note.card_id, note);
         }
         setIncompleteNotes(incMap);
-      })
-      .catch((e) => setError(friendlyError(e)))
-      .finally(() => setLoading(false));
+        setError("");
+      } catch (e) {
+        if (!retried && isAuthTokenError(e)) {
+          const recovered = await tryRecoverSession();
+          if (recovered) {
+            return load(true);
+          }
+        }
+        setError(friendlyError(e));
+      }
+      setLoading(false);
+    }
+    load();
   }, []);
 
   const {
