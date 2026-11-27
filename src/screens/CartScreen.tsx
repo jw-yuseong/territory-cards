@@ -104,8 +104,8 @@ export type WindowCheck = {
 };
 
 /**
- * 신청 가능 시간 판별:
- * 그 전날(00:00)부터 전시대가 시작되기 4시간 전까지 신청 및 취소 가능
+ * 신청 가능 시간 판별 (전시대 계정 기준):
+ * 그 전날(00:00)부터 전시대가 시작되기 1시간 전까지 신청 및 취소 가능
  */
 function checkApplicationWindow(
   serviceDateYmd: string,
@@ -117,9 +117,9 @@ function checkApplicationWindow(
 
   // 전날 00:00:00
   const openAt = new Date(y, m - 1, d - 1, 0, 0, 0, 0);
-  // 전시대 시작 시각 - 4시간
+  // 전시대 시작 시각 - 1시간
   const startAt = new Date(y, m - 1, d, hh, mm, 0, 0);
-  const closeAt = new Date(startAt.getTime() - 4 * 60 * 60 * 1000);
+  const closeAt = new Date(startAt.getTime() - 1 * 60 * 60 * 1000);
 
   const openMonth = openAt.getMonth() + 1;
   const openDate = openAt.getDate();
@@ -141,6 +141,22 @@ function checkApplicationWindow(
     return { allowed: false, status: "closed", openAtStr, closeAtStr };
   }
   return { allowed: true, status: "open", openAtStr, closeAtStr };
+}
+
+/**
+ * 봉사인도자/관리자 권한: 해당 전시대 봉사가 마칠 때(end_time)까지 추가 신청 및 취소 가능
+ */
+function isBeforeServiceEnd(
+  serviceDateYmd: string,
+  schedule: CartSchedule,
+  now: Date
+): boolean {
+  const [y, m, d] = serviceDateYmd.split("-").map(Number);
+  const [endH, endM] = (schedule.end_time || schedule.start_time || "23:59")
+    .split(":")
+    .map((v) => Number(v) || 0);
+  const endAt = new Date(y, m - 1, d, endH, endM, 0, 0);
+  return now.getTime() <= endAt.getTime();
 }
 
 /**
@@ -325,7 +341,7 @@ export default function CartScreen({
   function showWindowNoticePopup(s: CartSchedule, serviceDate: string, win: WindowCheck) {
     const title = formatScheduleFullTitle(s);
     setPopupMessage(
-      `전시대 신청 및 취소는 그 전날부터 전시대가 시작되기 4시간 전까지만 가능합니다.\n\n` +
+      `전시대 신청 및 취소는 그 전날부터 전시대가 시작되기 1시간 전까지만 가능합니다.\n\n` +
         `📌 선택한 일정:\n${fmtMonthDay(serviceDate)} ${title}\n\n` +
         `⏰ 신청·취소 가능 시간:\n${win.openAtStr} ~ ${win.closeAtStr}까지`
     );
@@ -372,12 +388,16 @@ export default function CartScreen({
   async function handleApply() {
     if (!selectedSchedule || !selectedPubId) return;
     const serviceDate = selectedServiceDate || getUpcomingServiceDate(selectedSchedule, new Date());
+    const curNow = new Date();
     if (!canPlanTeams) {
-      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
+      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, curNow);
       if (!win.allowed) {
         showWindowNoticePopup(selectedSchedule, serviceDate, win);
         return;
       }
+    } else if (!isBeforeServiceEnd(serviceDate, selectedSchedule, curNow)) {
+      setError("이미 종료된 전시대 봉사 시간입니다.");
+      return;
     }
 
     setBusy(true);
@@ -399,12 +419,16 @@ export default function CartScreen({
   function requestCancel(app: CartApplication) {
     if (!selectedSchedule) return;
     const serviceDate = selectedServiceDate || getUpcomingServiceDate(selectedSchedule, new Date());
+    const curNow = new Date();
     if (!canPlanTeams) {
-      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
+      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, curNow);
       if (!win.allowed) {
         showWindowNoticePopup(selectedSchedule, serviceDate, win);
         return;
       }
+    } else if (!isBeforeServiceEnd(serviceDate, selectedSchedule, curNow)) {
+      setError("이미 종료된 전시대 봉사 시간입니다.");
+      return;
     }
     setCancelStep(1);
     setCancelReasonChoice(CANCEL_REASON_PRESETS[0]);
@@ -441,12 +465,16 @@ export default function CartScreen({
   async function handleRestoreCancelled(app: CartApplication) {
     if (!selectedSchedule) return;
     const serviceDate = selectedServiceDate || getUpcomingServiceDate(selectedSchedule, new Date());
+    const curNow = new Date();
     if (!canPlanTeams) {
-      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, new Date());
+      const win = checkApplicationWindow(serviceDate, selectedSchedule.start_time, curNow);
       if (!win.allowed) {
         showWindowNoticePopup(selectedSchedule, serviceDate, win);
         return;
       }
+    } else if (!isBeforeServiceEnd(serviceDate, selectedSchedule, curNow)) {
+      setError("이미 종료된 전시대 봉사 시간입니다.");
+      return;
     }
     setBusy(true);
     setError("");
@@ -720,7 +748,9 @@ export default function CartScreen({
             {formatScheduleFullTitle(selectedSchedule)}
           </div>
           <div className="muted" style={{ fontSize: "var(--fs-small)" }}>
-            신청·취소 마감: {win.closeAtStr}까지 (시작 4시간 전)
+            {canPlanTeams
+              ? `인도자 권한: 봉사 종료(${selectedSchedule.end_time})까지 전도인 추가 신청 및 취소 가능`
+              : `신청·취소 마감: ${win.closeAtStr}까지 (시작 1시간 전)`}
           </div>
         </div>
 
@@ -1041,11 +1071,11 @@ export default function CartScreen({
       <div className="notice">
         {canPlanTeams ? (
           <>
-            인도자 화면입니다. 일정을 선택하면 <b>장소별(최대 3곳) 전시대 조를 계획·편성</b>할 수 있습니다.
+            인도자 화면입니다. 일정을 선택하면 <b>장소별(최대 3곳) 전시대 조를 계획·편성</b>할 수 있으며, <b>봉사 종료 시각까지</b> 전도인 추가 신청 및 취소가 가능합니다.
           </>
         ) : (
           <>
-            전시대 신청 및 취소는 <b>그 전날(오전 0시)부터 전시대 시작 4시간 전까지</b> 가능합니다.
+            전시대 신청 및 취소는 <b>그 전날(오전 0시)부터 전시대 시작 1시간 전까지</b> 가능합니다.
             신청할 시간대를 눌러 주세요.
           </>
         )}

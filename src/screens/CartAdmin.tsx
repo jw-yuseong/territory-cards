@@ -341,7 +341,7 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
               {(() => {
                 const h = Number(s.start_time.split(":")[0]) || 0;
                 const m = s.start_time.split(":")[1] ?? "00";
-                const closeH = Math.max(0, h - 4);
+                const closeH = Math.max(0, h - 1);
                 return `${String(closeH).padStart(2, "0")}:${m}`;
               })()}
               )
