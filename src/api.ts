@@ -1534,7 +1534,7 @@ export async function deleteCartTeamPlan(
 
 // ---- 날짜·시간대별 전시대 인도자 (CartSlotConductor) ----
 
-import type { CartSlotConductor } from "./types";
+import type { CartSlotConductor, FieldServiceConductor } from "./types";
 
 export async function fetchCartSlotConductors(
   startDate: string,
@@ -1657,5 +1657,105 @@ export async function deletePastCartSlotConductors(todayYmd: string): Promise<vo
     .lt("service_date", todayYmd);
   if (error) {
     console.warn("deletePastCartSlotConductors failed:", error);
+  }
+}
+
+// ---- 날짜별 호별봉사 인도자 및 특별 행사 ----
+
+export async function fetchFieldServiceConductors(
+  startDate: string,
+  endDate: string
+): Promise<FieldServiceConductor[]> {
+  const { data, error } = await supabase
+    .from("field_service_conductors")
+    .select("id, service_date, meeting_label, conductor_name, special_type, special_label, updated_at")
+    .gte("service_date", startDate)
+    .lte("service_date", endDate)
+    .order("service_date");
+  if (error) {
+    console.warn("fetchFieldServiceConductors failed (patch25 may not be applied yet):", error);
+    return [];
+  }
+  return (data ?? []) as FieldServiceConductor[];
+}
+
+export async function fetchTodayFieldServiceConductor(
+  todayYmd: string
+): Promise<FieldServiceConductor | null> {
+  const { data, error } = await supabase
+    .from("field_service_conductors")
+    .select("id, service_date, meeting_label, conductor_name, special_type, special_label, updated_at")
+    .eq("service_date", todayYmd)
+    .maybeSingle();
+  if (error) {
+    console.warn("fetchTodayFieldServiceConductor failed:", error);
+    return null;
+  }
+  return (data as FieldServiceConductor | null) ?? null;
+}
+
+export async function upsertFieldServiceConductor(row: {
+  service_date: string;
+  meeting_label: string;
+  conductor_name: string;
+  special_type: "" | "group_service" | "special_event" | "none";
+  special_label: string;
+}): Promise<void> {
+  const { error } = await supabase.from("field_service_conductors").upsert(
+    {
+      service_date: row.service_date,
+      meeting_label: row.meeting_label.trim(),
+      conductor_name: row.special_type ? "" : row.conductor_name.trim(),
+      special_type: row.special_type,
+      special_label: row.special_label.trim(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "service_date" }
+  );
+  if (error) throw new Error(error.message);
+}
+
+export async function bulkUpsertFieldServiceConductors(
+  rows: {
+    service_date: string;
+    meeting_label: string;
+    conductor_name: string;
+    special_type: "" | "group_service" | "special_event" | "none";
+    special_label: string;
+  }[]
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const nowIso = new Date().toISOString();
+  const payload = rows.map((r) => ({
+    service_date: r.service_date,
+    meeting_label: r.meeting_label.trim(),
+    conductor_name: r.special_type ? "" : r.conductor_name.trim(),
+    special_type: r.special_type,
+    special_label: r.special_label.trim(),
+    updated_at: nowIso,
+  }));
+  const { error } = await supabase
+    .from("field_service_conductors")
+    .upsert(payload, { onConflict: "service_date" });
+  if (error) throw new Error(error.message);
+  return payload.length;
+}
+
+export async function deleteFieldServiceConductor(serviceDate: string): Promise<void> {
+  const { error } = await supabase
+    .from("field_service_conductors")
+    .delete()
+    .eq("service_date", serviceDate);
+  if (error) throw new Error(error.message);
+}
+
+/** 오늘(todayYmd) 이전 날짜의 호별봉사 인도자 레코드를 자동 삭제 */
+export async function deletePastFieldServiceConductors(todayYmd: string): Promise<void> {
+  const { error } = await supabase
+    .from("field_service_conductors")
+    .delete()
+    .lt("service_date", todayYmd);
+  if (error) {
+    console.warn("deletePastFieldServiceConductors failed:", error);
   }
 }

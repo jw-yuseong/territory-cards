@@ -238,3 +238,15 @@ export interface CartSlotConductor {
   closure_reason?: string;
   updated_at: string;
 }
+
+export type FieldServiceSpecialType = "" | "group_service" | "special_event" | "none";
+
+export interface FieldServiceConductor {
+  id: string;
+  service_date: string; // 'YYYY-MM-DD'
+  meeting_label: string;
+  conductor_name: string;
+  special_type: FieldServiceSpecialType;
+  special_label: string;
+  updated_at: string;
+}

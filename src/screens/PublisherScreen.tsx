@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchCardProgress, fetchIncompleteNotes } from "../api";
+import {
+  fetchCardProgress,
+  fetchIncompleteNotes,
+  fetchTodayFieldServiceConductor,
+} from "../api";
 import { getCardSummaries } from "../lists";
-import type { CardProgress, CardSummary, CardIncompleteNote } from "../types";
+import type {
+  CardProgress,
+  CardSummary,
+  CardIncompleteNote,
+  FieldServiceConductor,
+} from "../types";
+import { FIELD_MEETING_LABELS } from "../extractCartConductors";
 import {
   displayNo,
   isCommercialCard,
@@ -16,10 +26,21 @@ import { friendlyError } from "../errors";
 import { isAuthTokenError, tryRecoverSession } from "../supabase";
 import { hapticTap } from "../haptics";
 
+const DAY_NAMES_KO: Record<number, string> = {
+  1: "월요일",
+  2: "화요일",
+  3: "수요일",
+  4: "목요일",
+  5: "금요일",
+  6: "토요일",
+  7: "일요일",
+};
+
 export default function PublisherScreen() {
   const [cards, setCards] = useState<CardSummary[]>([]);
   const [progressMap, setProgressMap] = useState<Map<string, CardProgress>>(new Map());
   const [incompleteNotes, setIncompleteNotes] = useState<Map<string, CardIncompleteNote>>(new Map());
+  const [todayFieldService, setTodayFieldService] = useState<FieldServiceConductor | null>(null);
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [showCompleted, setShowCompleted] = useState(false);
@@ -53,13 +74,20 @@ export default function PublisherScreen() {
   useEffect(() => {
     async function load(retried = false) {
       try {
-        const [cs, pr, inc] = await Promise.all([
+        const now = new Date();
+        const todayYmd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+          2,
+          "0"
+        )}-${String(now.getDate()).padStart(2, "0")}`;
+        const [cs, pr, inc, todayFs] = await Promise.all([
           getCardSummaries(),
           fetchCardProgress(),
           fetchIncompleteNotes(),
+          fetchTodayFieldServiceConductor(todayYmd),
         ]);
         setCards(cs);
         setProgressMap(new Map(pr.map((p) => [p.card_id, p])));
+        setTodayFieldService(todayFs);
 
         const incMap = new Map<string, CardIncompleteNote>();
         for (const note of inc) {
@@ -249,8 +277,133 @@ export default function PublisherScreen() {
   const totalActiveCount = round1Cards.length + round2Cards.length;
   const totalCompletedCount = completedRegular.length + completedComm.length;
 
+  const todayMeta = useMemo(() => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+    const jsDay = now.getDay();
+    const dow = jsDay === 0 ? 7 : jsDay; // 1=월..7=일
+    return {
+      month,
+      day,
+      dow,
+      dayName: DAY_NAMES_KO[dow] ?? "",
+      defaultMeetingLabel: FIELD_MEETING_LABELS[dow] ?? "",
+    };
+  }, []);
+
+  function renderTodayFieldServiceBanner() {
+    const { month, day, dow, dayName, defaultMeetingLabel } = todayMeta;
+    const dateHeader = `${month}월 ${day}일 (${dayName})`;
+
+    // 월요일 또는 '봉사 없음'으로 지정된 날
+    if (dow === 1 || todayFieldService?.special_type === "none") {
+      return (
+        <div
+          className="card-box"
+          style={{
+            padding: "12px 14px",
+            marginBottom: 14,
+            background: "var(--c-surface)",
+            borderColor: "var(--c-border)",
+          }}
+        >
+          <div style={{ fontSize: "var(--fs-small)", fontWeight: 700, color: "var(--c-muted)" }}>
+            📅 오늘의 봉사 마련 · {dateHeader}
+          </div>
+          <div style={{ marginTop: 4, fontSize: "var(--fs-base)", fontWeight: 600 }}>
+            오늘의 회중 봉사 마련이 없습니다.
+          </div>
+        </div>
+      );
+    }
+
+    // 집단봉사 날 (인도자 이름 미표시)
+    if (todayFieldService?.special_type === "group_service") {
+      const meetingLabel = todayFieldService.meeting_label || defaultMeetingLabel;
+      return (
+        <div
+          className="card-box"
+          style={{
+            padding: "12px 14px",
+            marginBottom: 14,
+            background: "#fffbeb",
+            borderColor: "#f59e0b",
+          }}
+        >
+          <div style={{ fontSize: "var(--fs-small)", fontWeight: 700, color: "#b45309" }}>
+            📅 오늘의 호별봉사 · {dateHeader}
+          </div>
+          {meetingLabel && (
+            <div style={{ marginTop: 4, fontSize: "var(--fs-small)", color: "var(--c-text)" }}>
+              ⏰ {meetingLabel}
+            </div>
+          )}
+          <div style={{ marginTop: 4, fontSize: "var(--fs-base)", fontWeight: 700, color: "#92400e" }}>
+            👥 오늘은 집단봉사입니다.
+          </div>
+        </div>
+      );
+    }
+
+    // 특별모임 등 기타 특별 행사
+    if (todayFieldService?.special_type === "special_event") {
+      const eventName = todayFieldService.special_label || "특별 행사";
+      return (
+        <div
+          className="card-box"
+          style={{
+            padding: "12px 14px",
+            marginBottom: 14,
+            background: "#eff6ff",
+            borderColor: "#3b82f6",
+          }}
+        >
+          <div style={{ fontSize: "var(--fs-small)", fontWeight: 700, color: "#1d4ed8" }}>
+            📅 오늘의 봉사 마련 · {dateHeader}
+          </div>
+          <div style={{ marginTop: 4, fontSize: "var(--fs-base)", fontWeight: 700, color: "#1e40af" }}>
+            📢 {eventName}
+          </div>
+        </div>
+      );
+    }
+
+    // 일반 호별봉사 날 (화~일)
+    const meetingLabel = todayFieldService?.meeting_label || defaultMeetingLabel;
+    const conductorName = todayFieldService?.conductor_name?.trim() || "";
+    return (
+      <div
+        className="card-box"
+        style={{
+          padding: "12px 14px",
+          marginBottom: 14,
+          background: "#f0fdf4",
+          borderColor: "#86efac",
+        }}
+      >
+        <div style={{ fontSize: "var(--fs-small)", fontWeight: 700, color: "#15803d" }}>
+          📅 오늘의 호별봉사 · {dateHeader}
+        </div>
+        <div style={{ marginTop: 4, fontSize: "var(--fs-base)", fontWeight: 700, color: "var(--c-text)" }}>
+          ⏰ {meetingLabel}
+        </div>
+        <div style={{ marginTop: 4, fontSize: "var(--fs-base)", fontWeight: 700, color: "#0f766e" }}>
+          {conductorName ? (
+            <>👤 인도자: {conductorName} 형제</>
+          ) : (
+            <span className="muted" style={{ fontWeight: 500, fontSize: "var(--fs-small)" }}>
+              👤 인도자 정보 미등록
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
+      {renderTodayFieldServiceBanner()}
       <div className="field">
         <label>구역카드 찾기</label>
         <input

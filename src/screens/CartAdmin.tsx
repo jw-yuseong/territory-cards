@@ -4,31 +4,40 @@ import {
   addCartPublisher,
   addCartSchedule,
   bulkUpsertCartSlotConductors,
+  bulkUpsertFieldServiceConductors,
   deleteCartLocation,
   deleteCartSchedule,
   deleteCartSlotConductor,
+  deleteFieldServiceConductor,
   deletePastCartSlotConductors,
+  deletePastFieldServiceConductors,
   fetchCartLocations,
   fetchCartPublishers,
   fetchCartSchedules,
   fetchCartSlotConductors,
+  fetchFieldServiceConductors,
   removeCartPublisher,
   setCartSlotClosed,
   updateCartLocation,
   updateCartSchedule,
   upsertCartSlotConductor,
+  upsertFieldServiceConductor,
 } from "../api";
 import type {
   CartLocation,
   CartPublisher,
   CartSchedule,
   CartSlotConductor,
+  FieldServiceConductor,
+  FieldServiceSpecialType,
 } from "../types";
 import { friendlyError } from "../errors";
 import { matchName } from "../chosung";
 import {
   extractCartConductorsFromPhoto,
+  FIELD_MEETING_LABELS,
   type ExtractedConductorRow,
+  type ExtractedFieldServiceRow,
 } from "../extractCartConductors";
 
 export const DAY_NAMES: Record<number, string> = {
@@ -151,18 +160,22 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
   const [newPubName, setNewPubName] = useState("");
   const [searchPub, setSearchPub] = useState("");
 
-  // 월별 전시대 인도자 배정 상태
+  // 월별 전시대 + 호별봉사 인도자 배정 상태
   const todayYmd = getTodayYmd();
   const currentMonthYm = getCurrentYearMonth();
+  const [conductorTab, setConductorTab] = useState<"cart" | "field">("cart");
   const [conductorMonth, setConductorMonth] = useState<string>(currentMonthYm);
   const [slotConductors, setSlotConductors] = useState<CartSlotConductor[]>([]);
+  const [fieldConductors, setFieldConductors] = useState<FieldServiceConductor[]>([]);
   const [loadingConductors, setLoadingConductors] = useState(false);
   const [editingConductorKey, setEditingConductorKey] = useState<string | null>(null);
   const [editingConductorName, setEditingConductorName] = useState<string>("");
+  const [editingFieldDate, setEditingFieldDate] = useState<string | null>(null);
+  const [editingFieldName, setEditingFieldName] = useState<string>("");
   const [showBulkBox, setShowBulkBox] = useState(false);
   const [bulkText, setBulkText] = useState("");
 
-  // 사진 무료 OCR 자동 추출 상태
+  // 사진 무료 OCR 자동 추출 상태 (전시대 + 호별봉사 동시)
   const [showPhotoBox, setShowPhotoBox] = useState(false);
   const [photoTargetMonth, setPhotoTargetMonth] = useState<string>(currentMonthYm);
   const [extractingPhoto, setExtractingPhoto] = useState(false);
@@ -170,17 +183,24 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
   const [photoPreviewRows, setPhotoPreviewRows] = useState<ExtractedConductorRow[] | null>(
     null
   );
+  const [photoPreviewFieldRows, setPhotoPreviewFieldRows] = useState<
+    ExtractedFieldServiceRow[] | null
+  >(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   async function reloadConductors(ym: string) {
     setLoadingConductors(true);
     try {
       const { from, to } = getMonthRange(ym);
-      const list = await fetchCartSlotConductors(from, to);
-      setSlotConductors(list);
+      const [cartList, fieldList] = await Promise.all([
+        fetchCartSlotConductors(from, to),
+        fetchFieldServiceConductors(from, to),
+      ]);
+      setSlotConductors(cartList);
+      setFieldConductors(fieldList);
     } catch {
-      // 테이블 미적용 등의 경우 조용히 빈 목록 유지
       setSlotConductors([]);
+      setFieldConductors([]);
     }
     setLoadingConductors(false);
   }
@@ -203,8 +223,12 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
 
   useEffect(() => {
     reload();
-    // 이미 지난 날짜의 인도자 배정은 자동으로 DB에서 정리
-    deletePastCartSlotConductors(getTodayYmd()).then(() => {
+    // 이미 지난 날짜의 전시대·호별봉사 인도자 배정은 자동으로 DB에서 정리
+    const today = getTodayYmd();
+    Promise.all([
+      deletePastCartSlotConductors(today),
+      deletePastFieldServiceConductors(today),
+    ]).then(() => {
       reloadConductors(conductorMonth);
     });
   }, []);
@@ -405,6 +429,41 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     return map;
   }, [slotConductors]);
 
+  const fieldByDate = useMemo(() => {
+    const map = new Map<string, FieldServiceConductor>();
+    for (const f of fieldConductors) {
+      map.set(f.service_date, f);
+    }
+    return map;
+  }, [fieldConductors]);
+
+  /** 선택된 월의 오늘 이후 호별봉사 일정 슬롯 (화~일) */
+  const monthlyFieldSlots = useMemo(() => {
+    const { year, month, daysInMonth } = getMonthRange(conductorMonth);
+    const mm = String(month).padStart(2, "0");
+    const result: {
+      serviceDate: string;
+      day: number;
+      dayOfWeek: number;
+      meetingLabel: string;
+    }[] = [];
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const serviceDate = `${year}-${mm}-${String(d).padStart(2, "0")}`;
+      if (serviceDate < todayYmd) continue;
+      const jsDay = new Date(year, month - 1, d).getDay();
+      const dow = jsDay === 0 ? 7 : jsDay;
+      if (dow === 1) continue; // 월요일은 회중 봉사 마련 없음
+      result.push({
+        serviceDate,
+        day: d,
+        dayOfWeek: dow,
+        meetingLabel: FIELD_MEETING_LABELS[dow] ?? "",
+      });
+    }
+    return result;
+  }, [conductorMonth, todayYmd]);
+
   /** 선택된 월의 오늘 이후 전시대 일정 슬롯만 표시 (이미 지난 날짜는 자동 제외) */
   const monthlySlots = useMemo(() => {
     const { year, month, daysInMonth } = getMonthRange(conductorMonth);
@@ -449,13 +508,15 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     setError("");
     setMsg("");
     setPhotoPreviewRows(null);
+    setPhotoPreviewFieldRows(null);
     try {
-      // 오타 자동 보정용 이름 사전 (승인 전도인 + 현재 등록된 인도자 + 주요 인도자)
+      // 오타 자동 보정용 이름 사전 (승인 전도인 + 기존 인도자 + 주요 인도자)
       const knownNames = Array.from(
         new Set(
           [
             ...publishers.map((p) => p.name.trim()),
             ...slotConductors.map((c) => c.conductor_name.trim()),
+            ...fieldConductors.map((f) => f.conductor_name.trim()),
             "김용훈",
             "김윤건",
             "김진기",
@@ -466,11 +527,17 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
             "강영출",
             "김동근",
             "이경복",
+            "김광식",
+            "박현서",
+            "이재준",
+            "김경민",
+            "이호석",
+            "양승",
           ].filter(Boolean)
         )
       );
 
-      const extracted = await extractCartConductorsFromPhoto(
+      const { cartRows, fieldRows } = await extractCartConductorsFromPhoto(
         file,
         year,
         month,
@@ -478,21 +545,18 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
         knownNames,
         (status) => setOcrProgress(status)
       );
-      const upcoming = extracted.filter((r) => r.service_date >= todayYmd);
-      const skippedPast = extracted.length - upcoming.length;
+      const upcomingCart = cartRows.filter((r) => r.service_date >= todayYmd);
+      const upcomingField = fieldRows.filter((r) => r.service_date >= todayYmd);
 
-      if (upcoming.length === 0) {
+      if (upcomingCart.length === 0 && upcomingField.length === 0) {
         setError(
-          skippedPast > 0
-            ? `${year}년 ${month}월 일정 ${skippedPast}건이 모두 이미 지난 날짜입니다. 대상 월을 확인해 주세요.`
-            : `${year}년 ${month}월 전시대 일정을 찾지 못했습니다. 대상 월(${year}년 ${month}월)이 사진과 일치하는지 확인해 주세요.`
+          `${year}년 ${month}월 예정 일정을 찾지 못했습니다. 대상 월(${year}년 ${month}월)이 사진과 일치하는지 확인해 주세요.`
         );
       } else {
-        setPhotoPreviewRows(upcoming);
+        setPhotoPreviewRows(upcomingCart);
+        setPhotoPreviewFieldRows(upcomingField);
         setMsg(
-          `사진에서 ${upcoming.length}건을 읽어왔습니다.${
-            skippedPast > 0 ? ` (지난 날짜 ${skippedPast}건 자동 제외)` : ""
-          } 오타나 빈 칸이 있으면 수정 후 '일괄 저장'을 눌러 주세요.`
+          `사진에서 전시대 ${upcomingCart.length}건 · 호별봉사 ${upcomingField.length}건을 읽어왔습니다. 오타나 빈 칸을 확인 후 '일괄 저장'을 눌러 주세요.`
         );
       }
     } catch (err) {
@@ -503,8 +567,7 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
   }
 
   async function handleConfirmPhotoPreview() {
-    if (!photoPreviewRows || photoPreviewRows.length === 0) return;
-    const valid = photoPreviewRows
+    const validCart = (photoPreviewRows ?? [])
       .map((r) => ({
         schedule_id: r.schedule_id,
         service_date: r.service_date,
@@ -514,7 +577,21 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
       }))
       .filter((r) => r.service_date >= todayYmd && (r.is_closed || Boolean(r.conductor_name)));
 
-    if (valid.length === 0) {
+    const validField = (photoPreviewFieldRows ?? [])
+      .map((r) => ({
+        service_date: r.service_date,
+        meeting_label: r.meeting_label,
+        conductor_name: r.special_type ? "" : r.conductor_name.trim().replace(/\s*형제$/, ""),
+        special_type: r.special_type,
+        special_label: r.special_label.trim(),
+      }))
+      .filter(
+        (r) =>
+          r.service_date >= todayYmd &&
+          (Boolean(r.special_type) || Boolean(r.conductor_name))
+      );
+
+    if (validCart.length === 0 && validField.length === 0) {
       setError("저장할 항목이 없습니다.");
       return;
     }
@@ -523,10 +600,12 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     setError("");
     setMsg("");
     try {
-      await bulkUpsertCartSlotConductors(valid);
-      const closedCount = valid.filter((v) => v.is_closed).length;
-      const condCount = valid.length - closedCount;
+      await Promise.all([
+        validCart.length > 0 ? bulkUpsertCartSlotConductors(validCart) : Promise.resolve(0),
+        validField.length > 0 ? bulkUpsertFieldServiceConductors(validField) : Promise.resolve(0),
+      ]);
       setPhotoPreviewRows(null);
+      setPhotoPreviewFieldRows(null);
       setShowPhotoBox(false);
       if (photoTargetMonth !== conductorMonth) {
         setConductorMonth(photoTargetMonth);
@@ -534,10 +613,87 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
         await reloadConductors(conductorMonth);
       }
       setMsg(
-        `사진에서 추출한 인도자 ${condCount}건${
-          closedCount > 0 ? ` 및 휴무(상가봉사 주간) ${closedCount}건` : ""
-        }이 저장되었습니다.`
+        `사진에서 추출한 전시대 ${validCart.length}건 · 호별봉사 ${validField.length}건이 한 번에 저장되었습니다.`
       );
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  async function handleSaveFieldConductor(serviceDate: string, meetingLabel: string) {
+    const cleaned = editingFieldName.trim().replace(/\s*형제$/, "");
+    if (!cleaned) {
+      setError("호별봉사 인도자 이름을 입력해 주세요.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await upsertFieldServiceConductor({
+        service_date: serviceDate,
+        meeting_label: meetingLabel,
+        conductor_name: cleaned,
+        special_type: "",
+        special_label: "",
+      });
+      setEditingFieldDate(null);
+      setEditingFieldName("");
+      setMsg(`${serviceDate} 호별봉사 인도자가 '${cleaned} 형제'로 저장되었습니다.`);
+      await reloadConductors(conductorMonth);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  async function handleSetFieldSpecial(
+    serviceDate: string,
+    meetingLabel: string,
+    type: FieldServiceSpecialType
+  ) {
+    let label = "";
+    if (type === "group_service") {
+      label = "집단봉사";
+    } else if (type === "special_event") {
+      const input = window.prompt(
+        `${serviceDate} 특별 행사 이름을 입력하세요 (예: 특별모임, 순회대회, 지역대회):`,
+        "특별모임"
+      );
+      if (input === null) return;
+      label = input.trim() || "특별모임";
+    } else if (type === "none") {
+      label = "봉사 없음";
+    }
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await upsertFieldServiceConductor({
+        service_date: serviceDate,
+        meeting_label: meetingLabel,
+        conductor_name: "",
+        special_type: type,
+        special_label: label,
+      });
+      setMsg(`${serviceDate} 일정이 '${label}'(으)로 설정되었습니다.`);
+      await reloadConductors(conductorMonth);
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  async function handleDeleteFieldConductor(serviceDate: string) {
+    if (!window.confirm(`${serviceDate} 호별봉사 인도자 배정을 삭제할까요?`)) return;
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await deleteFieldServiceConductor(serviceDate);
+      setMsg(`${serviceDate} 호별봉사 배정이 삭제되었습니다.`);
+      await reloadConductors(conductorMonth);
     } catch (e) {
       setError(friendlyError(e));
     }
@@ -993,7 +1149,7 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
         style={{ marginTop: 28, marginBottom: 8, alignItems: "center", flexWrap: "wrap", gap: 6 }}
       >
         <div className="section-title" style={{ margin: 0 }}>
-          👤 월별 전시대 인도자 배정
+          👤 월별 봉사 인도자 배정 (전시대·호별)
         </div>
         <div className="row" style={{ gap: 6, flexShrink: 0 }}>
           <button
@@ -1090,107 +1246,243 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
               : "📷 일정표 사진 선택하기"}
           </button>
 
-          {/* Step 3: 추출 결과 미리보기 & 수정 후 저장 */}
-          {photoPreviewRows && photoPreviewRows.length > 0 && (
+          {/* Step 3: 추출 결과 미리보기 & 수정 후 저장 (전시대 + 호별봉사 동시) */}
+          {((photoPreviewRows && photoPreviewRows.length > 0) ||
+            (photoPreviewFieldRows && photoPreviewFieldRows.length > 0)) && (
             <div style={{ marginTop: 12 }}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
-                추출 결과 확인 ({photoPreviewRows.length}건) — 오타가 있으면 바로 수정하세요
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-                {photoPreviewRows.map((row, idx) => {
-                  const mm = Number(row.service_date.slice(5, 7));
-                  const dd = Number(row.service_date.slice(8, 10));
-                  return (
-                    <div
-                      key={`${row.schedule_id}:${row.service_date}`}
-                      className="row"
-                      style={{ gap: 6, alignItems: "center" }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 600,
-                          minWidth: 105,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {mm}/{dd} ({DAY_SHORT[row.day_of_week]}) {row.start_time}
-                      </span>
-                      {row.is_closed ? (
-                        <span
-                          style={{
-                            flex: 1,
-                            fontSize: 13,
-                            fontWeight: 700,
-                            color: "#b45309",
-                            padding: "6px 8px",
-                            borderRadius: 6,
-                            background: "#fef3c7",
-                          }}
+              {photoPreviewRows && photoPreviewRows.length > 0 && (
+                <>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
+                    🛒 전시대 인도자 ({photoPreviewRows.length}건) — 오타가 있으면 바로 수정하세요
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                    {photoPreviewRows.map((row, idx) => {
+                      const mm = Number(row.service_date.slice(5, 7));
+                      const dd = Number(row.service_date.slice(8, 10));
+                      return (
+                        <div
+                          key={`${row.schedule_id}:${row.service_date}`}
+                          className="row"
+                          style={{ gap: 6, alignItems: "center" }}
                         >
-                          🚫 {row.closure_reason || "상가봉사 주간"} (전시대 없음)
-                        </span>
-                      ) : (
-                        <input
-                          type="text"
-                          value={row.conductor_name}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            setPhotoPreviewRows((prev) =>
-                              prev
-                                ? prev.map((r, i) =>
-                                    i === idx ? { ...r, conductor_name: val } : r
-                                  )
-                                : prev
-                            );
-                          }}
-                          style={{ flex: 1, minWidth: 70 }}
-                        />
-                      )}
-                      <button
-                        className="btn-line"
-                        style={{ padding: "4px 7px", minHeight: 0, fontSize: 11 }}
-                        onClick={() =>
-                          setPhotoPreviewRows((prev) =>
-                            prev
-                              ? prev.map((r, i) =>
-                                  i === idx
-                                    ? {
-                                        ...r,
-                                        is_closed: !r.is_closed,
-                                        closure_reason: !r.is_closed ? "상가봉사 주간" : "",
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              minWidth: 105,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {mm}/{dd} ({DAY_SHORT[row.day_of_week]}) {row.start_time}
+                          </span>
+                          {row.is_closed ? (
+                            <span
+                              style={{
+                                flex: 1,
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: "#b45309",
+                                padding: "6px 8px",
+                                borderRadius: 6,
+                                background: "#fef3c7",
+                              }}
+                            >
+                              🚫 {row.closure_reason || "상가봉사 주간"} (전시대 없음)
+                            </span>
+                          ) : (
+                            <input
+                              type="text"
+                              value={row.conductor_name}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPhotoPreviewRows((prev) =>
+                                  prev
+                                    ? prev.map((r, i) =>
+                                        i === idx ? { ...r, conductor_name: val } : r
+                                      )
+                                    : prev
+                                );
+                              }}
+                              style={{ flex: 1, minWidth: 70 }}
+                            />
+                          )}
+                          <button
+                            className="btn-line"
+                            style={{ padding: "4px 7px", minHeight: 0, fontSize: 11 }}
+                            onClick={() =>
+                              setPhotoPreviewRows((prev) =>
+                                prev
+                                  ? prev.map((r, i) =>
+                                      i === idx
+                                        ? {
+                                            ...r,
+                                            is_closed: !r.is_closed,
+                                            closure_reason: !r.is_closed ? "상가봉사 주간" : "",
+                                          }
+                                        : r
+                                    )
+                                  : prev
+                              )
+                            }
+                            title={row.is_closed ? "휴무 해제하고 인도자 입력" : "이 시간대 휴무로 전환"}
+                          >
+                            {row.is_closed ? "해제" : "휴무"}
+                          </button>
+                          <button
+                            className="btn-line"
+                            style={{
+                              padding: "4px 8px",
+                              minHeight: 0,
+                              fontSize: 12,
+                              color: "var(--c-danger)",
+                              borderColor: "var(--c-danger)",
+                            }}
+                            onClick={() =>
+                              setPhotoPreviewRows((prev) =>
+                                prev ? prev.filter((_, i) => i !== idx) : prev
+                              )
+                            }
+                            title="이 항목 제외"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {photoPreviewFieldRows && photoPreviewFieldRows.length > 0 && (
+                <>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>
+                    🏠 호별봉사 인도자 ({photoPreviewFieldRows.length}건) — 봉사자 계정에 표시
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                    {photoPreviewFieldRows.map((row, idx) => {
+                      const mm = Number(row.service_date.slice(5, 7));
+                      const dd = Number(row.service_date.slice(8, 10));
+                      return (
+                        <div
+                          key={row.service_date}
+                          className="row"
+                          style={{ gap: 6, alignItems: "center" }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 13,
+                              fontWeight: 600,
+                              minWidth: 74,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {mm}/{dd} ({DAY_SHORT[row.day_of_week]})
+                          </span>
+                          {row.special_type === "group_service" ? (
+                            <span
+                              style={{
+                                flex: 1,
+                                fontSize: 13,
+                                fontWeight: 700,
+                                color: "#92400e",
+                                padding: "6px 8px",
+                                borderRadius: 6,
+                                background: "#fef3c7",
+                              }}
+                            >
+                              👥 집단봉사
+                            </span>
+                          ) : row.special_type === "special_event" ? (
+                            <input
+                              type="text"
+                              value={row.special_label}
+                              placeholder="특별 행사명"
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPhotoPreviewFieldRows((prev) =>
+                                  prev
+                                    ? prev.map((r, i) =>
+                                        i === idx ? { ...r, special_label: val } : r
+                                      )
+                                    : prev
+                                );
+                              }}
+                              style={{
+                                flex: 1,
+                                minWidth: 70,
+                                background: "#eff6ff",
+                                borderColor: "#93c5fd",
+                              }}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={row.conductor_name}
+                              placeholder="인도자 이름"
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPhotoPreviewFieldRows((prev) =>
+                                  prev
+                                    ? prev.map((r, i) =>
+                                        i === idx ? { ...r, conductor_name: val } : r
+                                      )
+                                    : prev
+                                );
+                              }}
+                              style={{ flex: 1, minWidth: 70 }}
+                            />
+                          )}
+                          <button
+                            className="btn-line"
+                            style={{ padding: "4px 6px", minHeight: 0, fontSize: 11 }}
+                            onClick={() =>
+                              setPhotoPreviewFieldRows((prev) =>
+                                prev
+                                  ? prev.map((r, i) => {
+                                      if (i !== idx) return r;
+                                      if (r.special_type === "") {
+                                        return {
+                                          ...r,
+                                          special_type:
+                                            r.day_of_week === 7 ? "group_service" : "special_event",
+                                          special_label:
+                                            r.day_of_week === 7 ? "집단봉사" : "특별모임",
+                                        };
                                       }
-                                    : r
-                                )
-                              : prev
-                          )
-                        }
-                        title={row.is_closed ? "휴무 해제하고 인도자 입력" : "이 시간대 휴무로 전환"}
-                      >
-                        {row.is_closed ? "해제" : "휴무"}
-                      </button>
-                      <button
-                        className="btn-line"
-                        style={{
-                          padding: "4px 8px",
-                          minHeight: 0,
-                          fontSize: 12,
-                          color: "var(--c-danger)",
-                          borderColor: "var(--c-danger)",
-                        }}
-                        onClick={() =>
-                          setPhotoPreviewRows((prev) =>
-                            prev ? prev.filter((_, i) => i !== idx) : prev
-                          )
-                        }
-                        title="이 항목 제외"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                                      return { ...r, special_type: "", special_label: "" };
+                                    })
+                                  : prev
+                              )
+                            }
+                            title="일반 인도자 ↔ 집단봉사/특별행사 전환"
+                          >
+                            {row.special_type ? "일반" : row.day_of_week === 7 ? "집단" : "행사"}
+                          </button>
+                          <button
+                            className="btn-line"
+                            style={{
+                              padding: "4px 8px",
+                              minHeight: 0,
+                              fontSize: 12,
+                              color: "var(--c-danger)",
+                              borderColor: "var(--c-danger)",
+                            }}
+                            onClick={() =>
+                              setPhotoPreviewFieldRows((prev) =>
+                                prev ? prev.filter((_, i) => i !== idx) : prev
+                              )
+                            }
+                            title="이 항목 제외"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
               <div className="row">
                 <button
                   className="btn-primary"
@@ -1202,7 +1494,10 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
                 <button
                   className="btn-line"
                   disabled={busy}
-                  onClick={() => setPhotoPreviewRows(null)}
+                  onClick={() => {
+                    setPhotoPreviewRows(null);
+                    setPhotoPreviewFieldRows(null);
+                  }}
                 >
                   취소
                 </button>
@@ -1295,10 +1590,201 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
         </button>
       </div>
 
+      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+        <button
+          className={conductorTab === "cart" ? "btn-primary" : "btn-line"}
+          style={{ flex: 1, minHeight: 0, padding: "8px 10px", fontSize: 13 }}
+          onClick={() => setConductorTab("cart")}
+        >
+          🛒 전시대 인도자 ({monthlySlots.length})
+        </button>
+        <button
+          className={conductorTab === "field" ? "btn-primary" : "btn-line"}
+          style={{ flex: 1, minHeight: 0, padding: "8px 10px", fontSize: 13 }}
+          onClick={() => setConductorTab("field")}
+        >
+          🏠 호별봉사 인도자 ({monthlyFieldSlots.length})
+        </button>
+      </div>
+
       {loadingConductors ? (
         <div className="muted" style={{ padding: "10px 0" }}>
           인도자 배정 불러오는 중…
         </div>
+      ) : conductorTab === "field" ? (
+        monthlyFieldSlots.length === 0 ? (
+          <div className="muted" style={{ padding: "10px 0", fontSize: 13 }}>
+            이 달에 남아 있는 예정 호별봉사 일정이 없습니다. (이미 지난 날짜는 자동 삭제됩니다)
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {monthlyFieldSlots.map((slot) => {
+              const info = fieldByDate.get(slot.serviceDate);
+              const isEditing = editingFieldDate === slot.serviceDate;
+              const monthNum = Number(slot.serviceDate.slice(5, 7));
+              return (
+                <div
+                  key={slot.serviceDate}
+                  className="card"
+                  style={{
+                    padding: "10px 12px",
+                    marginBottom: 0,
+                    background:
+                      info?.special_type === "group_service"
+                        ? "#fffbeb"
+                        : info?.special_type === "special_event"
+                        ? "#eff6ff"
+                        : undefined,
+                  }}
+                >
+                  {isEditing ? (
+                    <div className="row" style={{ gap: 6 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+                        {monthNum}/{slot.day} ({DAY_SHORT[slot.dayOfWeek]})
+                      </div>
+                      <input
+                        type="text"
+                        value={editingFieldName}
+                        onChange={(e) => setEditingFieldName(e.target.value)}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" &&
+                          handleSaveFieldConductor(slot.serviceDate, slot.meetingLabel)
+                        }
+                        placeholder="인도자 이름"
+                        style={{ flex: 1, minWidth: 80 }}
+                        autoFocus
+                      />
+                      <button
+                        className="btn-primary"
+                        style={{ width: "auto", padding: "6px 12px", minHeight: 0, fontSize: 13 }}
+                        disabled={busy}
+                        onClick={() =>
+                          handleSaveFieldConductor(slot.serviceDate, slot.meetingLabel)
+                        }
+                      >
+                        저장
+                      </button>
+                      <button
+                        className="btn-line"
+                        style={{ padding: "6px 10px", minHeight: 0, fontSize: 13 }}
+                        disabled={busy}
+                        onClick={() => {
+                          setEditingFieldDate(null);
+                          setEditingFieldName("");
+                        }}
+                      >
+                        취소
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="row-between" style={{ alignItems: "center", gap: 8 }}>
+                      <div style={{ fontSize: 14 }}>
+                        <strong>
+                          {monthNum}월 {slot.day}일 ({DAY_SHORT[slot.dayOfWeek]})
+                        </strong>{" "}
+                        <span className="muted" style={{ fontSize: 12 }}>
+                          {slot.meetingLabel.replace(/^.+요일\s*/, "")}
+                        </span>
+                        <div style={{ marginTop: 2, fontSize: 13 }}>
+                          {info?.special_type === "group_service" ? (
+                            <span style={{ color: "#b45309", fontWeight: 700 }}>
+                              👥 집단봉사
+                            </span>
+                          ) : info?.special_type === "special_event" ? (
+                            <span style={{ color: "#1d4ed8", fontWeight: 700 }}>
+                              📢 {info.special_label || "특별 행사"}
+                            </span>
+                          ) : info?.special_type === "none" ? (
+                            <span className="muted">봉사 마련 없음</span>
+                          ) : info?.conductor_name ? (
+                            <span style={{ color: "var(--c-primary)", fontWeight: 700 }}>
+                              👤 {info.conductor_name} 형제
+                            </span>
+                          ) : (
+                            <span className="muted">미배정</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="row" style={{ gap: 5, flexShrink: 0, flexWrap: "wrap" }}>
+                        <button
+                          className="btn-line"
+                          style={{ padding: "4px 8px", minHeight: 0, fontSize: 12 }}
+                          disabled={busy}
+                          onClick={() => {
+                            setEditingFieldDate(slot.serviceDate);
+                            setEditingFieldName(info?.conductor_name ?? "");
+                            setError("");
+                            setMsg("");
+                          }}
+                        >
+                          {info?.conductor_name ? "변경" : "지정"}
+                        </button>
+                        {slot.dayOfWeek === 7 && (
+                          <button
+                            className="btn-line"
+                            style={{
+                              padding: "4px 7px",
+                              minHeight: 0,
+                              fontSize: 11,
+                              color: "#b45309",
+                              borderColor: "#f59e0b",
+                            }}
+                            disabled={busy}
+                            onClick={() =>
+                              handleSetFieldSpecial(
+                                slot.serviceDate,
+                                slot.meetingLabel,
+                                "group_service"
+                              )
+                            }
+                          >
+                            집단봉사
+                          </button>
+                        )}
+                        <button
+                          className="btn-line"
+                          style={{
+                            padding: "4px 7px",
+                            minHeight: 0,
+                            fontSize: 11,
+                            color: "#1d4ed8",
+                            borderColor: "#93c5fd",
+                          }}
+                          disabled={busy}
+                          onClick={() =>
+                            handleSetFieldSpecial(
+                              slot.serviceDate,
+                              slot.meetingLabel,
+                              "special_event"
+                            )
+                          }
+                        >
+                          행사
+                        </button>
+                        {info && (
+                          <button
+                            className="btn-line"
+                            style={{
+                              padding: "4px 7px",
+                              minHeight: 0,
+                              fontSize: 11,
+                              color: "var(--c-danger)",
+                              borderColor: "var(--c-danger)",
+                            }}
+                            disabled={busy}
+                            onClick={() => handleDeleteFieldConductor(slot.serviceDate)}
+                          >
+                            삭제
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )
       ) : monthlySlots.length === 0 ? (
         <div className="muted" style={{ padding: "10px 0", fontSize: 13 }}>
           이 달에 남아 있는 예정 전시대 일정이 없습니다. (이미 지난 날짜는 자동 삭제됩니다)

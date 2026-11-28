@@ -1,4 +1,4 @@
-import type { CartSchedule } from "./types";
+import type { CartSchedule, FieldServiceSpecialType } from "./types";
 
 export type ExtractedConductorRow = {
   schedule_id: string;
@@ -8,6 +8,30 @@ export type ExtractedConductorRow = {
   conductor_name: string;
   is_closed: boolean;
   closure_reason: string;
+};
+
+export type ExtractedFieldServiceRow = {
+  service_date: string; // 'YYYY-MM-DD'
+  day_of_week: number; // 2..7 (화~일)
+  meeting_label: string;
+  conductor_name: string;
+  special_type: FieldServiceSpecialType;
+  special_label: string;
+};
+
+export type ExtractedScheduleResult = {
+  cartRows: ExtractedConductorRow[];
+  fieldRows: ExtractedFieldServiceRow[];
+};
+
+/** 요일별 기본 호별봉사 모임 시간 문구 (화~일) */
+export const FIELD_MEETING_LABELS: Record<number, string> = {
+  2: "화요일 오전 10시 봉사모임",
+  3: "수요일 오후 2시 봉사모임",
+  4: "목요일 오전 10시 봉사모임",
+  5: "금요일 오전 10시 봉사모임",
+  6: "토요일 오전 10시 봉사모임",
+  7: "일요일 주말 집회 이후 봉사모임",
 };
 
 /** 시간('18:00', '16:00', '14:00' 등) -> '오전' | '오후' | '저녁' */
@@ -118,7 +142,6 @@ function autoCorrectName(raw: string, knownNames: string[]): string {
     }
   }
 
-  // 자모 2개 이하 차이이고 유일한 최선 매칭일 때만 자동 교정
   if (!tie && bestDist <= 2) {
     return bestName;
   }
@@ -150,9 +173,7 @@ async function loadImageToCanvas(file: File): Promise<HTMLCanvasElement> {
   return canvas;
 }
 
-/**
- * 요일 헤더 바(어두운 남색/파랑/빨강 줄)의 하단 Y 좌표를 자동 탐지한다.
- */
+/** 요일 헤더 바(어두운 남색/파랑/빨강 줄)의 하단 Y 좌표를 자동 탐지 */
 function detectHeaderBottomY(canvas: HTMLCanvasElement): number {
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   const { width, height } = canvas;
@@ -193,10 +214,7 @@ function detectHeaderBottomY(canvas: HTMLCanvasElement): number {
   return bestEnd > 0 ? bestEnd + 2 : 0;
 }
 
-/**
- * 달력 본문(gridTop ~ height)이 실제로 몇 개 주 행(4, 5, 6 중 하나)으로 나뉘어 있는지
- * 수평 경계선 정렬 점수로 자동 판별한다.
- */
+/** 달력 본문이 실제로 몇 개 주 행(4, 5, 6 중 하나)으로 나뉘어 있는지 자동 판별 */
 function detectRowCount(
   canvas: HTMLCanvasElement,
   gridTop: number,
@@ -208,8 +226,6 @@ function detectRowCount(
   if (bodyH <= 50) return calendarWeekCount;
 
   const imgData = ctx.getImageData(0, gridTop, width, bodyH).data;
-
-  // 각 y행이 가로 격자선/날짜띠 경계인지 점수 계산 (흰색이 아닌 픽셀 비율)
   const lineScore = new Float32Array(bodyH);
   for (let y = 0; y < bodyH; y++) {
     let nonWhite = 0;
@@ -219,13 +235,11 @@ function detectRowCount(
       const r = imgData[idx];
       const g = imgData[idx + 1];
       const b = imgData[idx + 2];
-      // 연한 회색/파랑 격자선 또는 배경띠
       if (r < 245 || g < 245 || b < 245) nonWhite++;
     }
     lineScore[y] = nonWhite / (width / 3);
   }
 
-  // 후보 행 수 (달력 주 수와 5를 우선 후보로 평가)
   const candidates = Array.from(new Set([calendarWeekCount, 5, 4, 6])).filter(
     (n) => n >= 4 && n <= 6
   );
@@ -248,7 +262,6 @@ function detectRowCount(
       total += peak;
     }
     const avg = total / (n - 1);
-    // 실제 달력 주 수와 같으면 미세 가산점
     const adjusted = avg + (n === calendarWeekCount ? 0.04 : 0);
     if (adjusted > bestScore) {
       bestScore = adjusted;
@@ -285,9 +298,7 @@ function cellHasDarkText(
   return false;
 }
 
-/**
- * 셀 영역을 3배 확대 + 고대비 흑백 처리 + 흰 여백 패딩한 OCR용 캔버스 생성
- */
+/** 셀 영역을 3배 확대 + 고대비 흑백 처리 + 흰 여백 패딩한 OCR용 캔버스 생성 */
 function cropCellForOcr(
   srcCanvas: HTMLCanvasElement,
   sx: number,
@@ -311,7 +322,6 @@ function cropCellForOcr(
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(srcCanvas, sx, sy, sw, sh, pad, pad, dw, dh);
 
-  // 고대비 그레이스케일 보정 (노란/회색 배경 제거 -> 깔끔한 검정 글씨)
   const imgData = ctx.getImageData(0, 0, out.width, out.height);
   const d = imgData.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -332,6 +342,9 @@ function cropCellForOcr(
   return out;
 }
 
+const EVENT_KEYWORD_RE =
+  /특별모임|특별강연|순회대회|지역대회|국제대회|대회|기념식|야외봉사|회중청소|청소|방문|모임|휴무|공휴일|특수|행사/;
+
 /** OCR 텍스트에서 시간대('오전' | '오후' | '저녁')별 인도자 이름 추출 */
 function parsePeriodNamesFromCellText(
   text: string,
@@ -344,7 +357,6 @@ function parsePeriodNamesFromCellText(
     .filter(Boolean);
 
   for (const line of lines) {
-    // 콜론/세미콜론/공백 등 OCR 변형 허용
     const m = line.match(
       /^(오\s*[전진]|오\s*[후무푸추]|저\s*[녁넉낵럭닉녹])\s*[:;.\-\s]+\s*(.+)$/
     );
@@ -373,8 +385,136 @@ function parsePeriodNamesFromCellText(
 }
 
 /**
+ * 요일 셀의 OCR 텍스트에서 호별봉사 정보(인도자 이름 또는 집단봉사·특별행사)를 추출한다.
+ * - 화(2), 목(4), 토(6): '오전:' 라벨 우선, 없으면 '오후/저녁'이 아닌 첫 줄을 특별 행사로 인식
+ * - 수(3), 금(5), 일(7): 단일 항목 셀 — 집단봉사 / 특별행사 / 인도자 이름 판별
+ */
+function parseFieldServiceFromCellText(
+  dow: number,
+  serviceDate: string,
+  text: string,
+  periodMap: Partial<Record<"오전" | "오후" | "저녁", string>>,
+  knownNames: string[]
+): ExtractedFieldServiceRow {
+  const meeting_label = FIELD_MEETING_LABELS[dow] ?? "";
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const compactAll = lines.join(" ").replace(/\s+/g, "");
+
+  // 1) 집단봉사 감지 (예: '집단봉사 (인도:믿음집단)')
+  if (/집단봉사|집단\s*봉사/.test(compactAll)) {
+    return {
+      service_date: serviceDate,
+      day_of_week: dow,
+      meeting_label,
+      conductor_name: "",
+      special_type: "group_service",
+      special_label: "집단봉사",
+    };
+  }
+
+  // 2) 화·목·토 (오전/오후/저녁 복수 줄 구조)
+  if (dow === 2 || dow === 4 || dow === 6) {
+    if (periodMap["오전"]) {
+      return {
+        service_date: serviceDate,
+        day_of_week: dow,
+        meeting_label,
+        conductor_name: periodMap["오전"],
+        special_type: "",
+        special_label: "",
+      };
+    }
+
+    // '오전:'이 없는 경우, '오후:'/'저녁:'이 아닌 줄에 적힌 특별 행사명(예: 특별모임, 순회대회 등) 추출
+    const nonCartLines = lines.filter(
+      (l) => !/^(오\s*[후무푸추]|저\s*[녁넉낵럭닉녹])\s*[:;.\-\s]/.test(l)
+    );
+    const cleanedEvent = nonCartLines
+      .join(" ")
+      .replace(/[^가-힣0-9a-zA-Z\s()·-]/g, "")
+      .trim();
+    const koreanOnly = cleanedEvent.replace(/[^가-힣]/g, "");
+
+    if (koreanOnly.length >= 2) {
+      return {
+        service_date: serviceDate,
+        day_of_week: dow,
+        meeting_label,
+        conductor_name: "",
+        special_type: "special_event",
+        special_label: cleanedEvent,
+      };
+    }
+
+    return {
+      service_date: serviceDate,
+      day_of_week: dow,
+      meeting_label,
+      conductor_name: "",
+      special_type: "",
+      special_label: "",
+    };
+  }
+
+  // 3) 수·금·일 (단일 항목 셀)
+  // 혹시 '오후: 김광식'처럼 라벨이 붙은 경우도 처리
+  const labeledName = periodMap["오전"] || periodMap["오후"] || periodMap["저녁"];
+  if (labeledName) {
+    return {
+      service_date: serviceDate,
+      day_of_week: dow,
+      meeting_label,
+      conductor_name: labeledName,
+      special_type: "",
+      special_label: "",
+    };
+  }
+
+  const rawJoined = lines.join(" ").replace(/[^가-힣0-9a-zA-Z\s()·-]/g, "").trim();
+  const koreanOnly = rawJoined.replace(/[^가-힣]/g, "");
+
+  if (!koreanOnly) {
+    return {
+      service_date: serviceDate,
+      day_of_week: dow,
+      meeting_label,
+      conductor_name: "",
+      special_type: "",
+      special_label: "",
+    };
+  }
+
+  // 특별 행사 키워드가 포함되거나 5글자 이상이면 특별 행사로 분류
+  if (EVENT_KEYWORD_RE.test(koreanOnly) || koreanOnly.length >= 5) {
+    return {
+      service_date: serviceDate,
+      day_of_week: dow,
+      meeting_label,
+      conductor_name: "",
+      special_type: "special_event",
+      special_label: rawJoined,
+    };
+  }
+
+  // 2~4글자 한글 이름 -> 인도자
+  const corrected = autoCorrectName(koreanOnly, knownNames);
+  return {
+    service_date: serviceDate,
+    day_of_week: dow,
+    meeting_label,
+    conductor_name: corrected,
+    special_type: "",
+    special_label: "",
+  };
+}
+
+/**
  * API 키 없이 브라우저 내장 무료 한글 OCR(Tesseract.js)로
- * 달력 일정표 사진에서 전시대 인도자 및 '상가봉사주간'(목 저녁·토 오후 휴무)을 자동 추출한다.
+ * 달력 일정표 사진 1장에서 [전시대 인도자 + 상가봉사 주간]과 [호별봉사 인도자 + 집단봉사·특별행사]를
+ * 동시에 자동 추출한다.
  */
 export async function extractCartConductorsFromPhoto(
   file: File,
@@ -383,11 +523,7 @@ export async function extractCartConductorsFromPhoto(
   schedules: CartSchedule[],
   knownNames: string[] = [],
   onProgress?: (statusText: string) => void
-): Promise<ExtractedConductorRow[]> {
-  if (schedules.length === 0) {
-    throw new Error("등록된 전시대 시간표가 없습니다.");
-  }
-
+): Promise<ExtractedScheduleResult> {
   onProgress?.("이미지 분석 준비 중…");
   const srcCanvas = await loadImageToCanvas(file);
   const gridTop = detectHeaderBottomY(srcCanvas);
@@ -398,9 +534,7 @@ export async function extractCartConductorsFromPhoto(
   const colW = srcCanvas.width / 7;
   const rowH = (srcCanvas.height - gridTop) / rowCount;
 
-  // OCR 대상 셀 목록 구성: (1) 월요일(상가봉사주간 감지용) + (2) 활성 전시대 요일 셀
-  const activeDows = new Set(schedules.map((s) => s.day_of_week));
-
+  // 1) 월요일(상가봉사주간 감지용) 대상 셀
   const mondayTargets: { weekIdx: number; sx: number; sy: number; sw: number; sh: number }[] = [];
   for (let wIdx = 0; wIdx < usableWeeks.length; wIdx++) {
     const sx = 4;
@@ -412,6 +546,7 @@ export async function extractCartConductorsFromPhoto(
     }
   }
 
+  // 2) 화~일(col 1..6) 대상 셀 (전시대 + 호별봉사 모두 커버)
   const dayTargets: {
     weekIdx: number;
     dow: number;
@@ -424,9 +559,8 @@ export async function extractCartConductorsFromPhoto(
 
   for (let wIdx = 0; wIdx < usableWeeks.length; wIdx++) {
     const week = usableWeeks[wIdx];
-    for (let col = 0; col < 7; col++) {
-      const dow = col + 1; // 1=월..7=일
-      if (!activeDows.has(dow)) continue;
+    for (let col = 1; col <= 6; col++) {
+      const dow = col + 1; // 2=화..7=일
       const dt = week[col];
       if (dt.getFullYear() !== year || dt.getMonth() + 1 !== month) continue;
 
@@ -460,7 +594,8 @@ export async function extractCartConductorsFromPhoto(
   });
 
   const businessWeekSet = new Set<number>();
-  const results: ExtractedConductorRow[] = [];
+  const cartRows: ExtractedConductorRow[] = [];
+  const fieldRows: ExtractedFieldServiceRow[] = [];
   let doneSteps = 0;
 
   try {
@@ -476,30 +611,34 @@ export async function extractCartConductorsFromPhoto(
       }
     }
 
-    // 2) 활성 전시대 요일 칸 OCR 및 시간대 매칭
+    // 2) 화~일 각 날짜 칸 OCR -> 전시대 + 호별봉사 동시 파싱
     for (const dt of dayTargets) {
       doneSteps++;
       onProgress?.(`일정표 읽는 중… (${doneSteps} / ${totalSteps})`);
 
+      let rawText = "";
+      if (cellHasDarkText(srcCanvas, dt.sx, dt.sy, dt.sw, dt.sh)) {
+        const cellCanvas = cropCellForOcr(srcCanvas, dt.sx, dt.sy, dt.sw, dt.sh);
+        const { data } = await worker.recognize(cellCanvas);
+        rawText = data.text || "";
+      }
+
+      const periodMap = parsePeriodNamesFromCellText(rawText, knownNames);
+
+      // (A) 호별봉사 추출 (화~일 매일 1건)
+      fieldRows.push(
+        parseFieldServiceFromCellText(dt.dow, dt.serviceDate, rawText, periodMap, knownNames)
+      );
+
+      // (B) 전시대 추출 (활성 전시대 일정이 있는 요일만)
       const daySchedules = schedules
         .filter((s) => s.day_of_week === dt.dow)
         .sort((a, b) => a.start_time.localeCompare(b.start_time));
-
       const isBizWeek = businessWeekSet.has(dt.weekIdx);
-      const needOcrSchedules = daySchedules.filter(
-        (s) => !(isBizWeek && isBusinessTerritoryClosedSlot(s))
-      );
-
-      let periodMap: Partial<Record<"오전" | "오후" | "저녁", string>> = {};
-      if (needOcrSchedules.length > 0 && cellHasDarkText(srcCanvas, dt.sx, dt.sy, dt.sw, dt.sh)) {
-        const cellCanvas = cropCellForOcr(srcCanvas, dt.sx, dt.sy, dt.sw, dt.sh);
-        const { data } = await worker.recognize(cellCanvas);
-        periodMap = parsePeriodNamesFromCellText(data.text || "", knownNames);
-      }
 
       for (const s of daySchedules) {
         if (isBizWeek && isBusinessTerritoryClosedSlot(s)) {
-          results.push({
+          cartRows.push({
             schedule_id: s.id,
             service_date: dt.serviceDate,
             start_time: s.start_time.slice(0, 5),
@@ -510,13 +649,12 @@ export async function extractCartConductorsFromPhoto(
           });
         } else {
           const period = timePeriodOf(s.start_time);
-          const name = periodMap[period] ?? "";
-          results.push({
+          cartRows.push({
             schedule_id: s.id,
             service_date: dt.serviceDate,
             start_time: s.start_time.slice(0, 5),
             day_of_week: dt.dow,
-            conductor_name: name,
+            conductor_name: periodMap[period] ?? "",
             is_closed: false,
             closure_reason: "",
           });
@@ -527,11 +665,12 @@ export async function extractCartConductorsFromPhoto(
     await worker.terminate().catch(() => {});
   }
 
-  results.sort((a, b) =>
+  cartRows.sort((a, b) =>
     a.service_date === b.service_date
       ? a.start_time.localeCompare(b.start_time)
       : a.service_date.localeCompare(b.service_date)
   );
+  fieldRows.sort((a, b) => a.service_date.localeCompare(b.service_date));
 
-  return results;
+  return { cartRows, fieldRows };
 }
