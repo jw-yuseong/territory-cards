@@ -228,6 +228,21 @@ export default function PublisherScreen() {
     };
   }, [cards, query, progressMap, incompleteNotes]);
 
+  const todayMeta = useMemo(() => {
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const day = now.getDate();
+    const jsDay = now.getDay();
+    const dow = jsDay === 0 ? 7 : jsDay; // 1=월..7=일
+    return {
+      month,
+      day,
+      dow,
+      dayName: DAY_NAMES_KO[dow] ?? "",
+      defaultMeetingLabel: FIELD_MEETING_LABELS[dow] ?? "",
+    };
+  }, []);
+
   if (selected) {
     return <CardDetail key={selected.id} card={selected} onBack={closeCard} />;
   }
@@ -276,21 +291,6 @@ export default function PublisherScreen() {
 
   const totalActiveCount = round1Cards.length + round2Cards.length;
   const totalCompletedCount = completedRegular.length + completedComm.length;
-
-  const todayMeta = useMemo(() => {
-    const now = new Date();
-    const month = now.getMonth() + 1;
-    const day = now.getDate();
-    const jsDay = now.getDay();
-    const dow = jsDay === 0 ? 7 : jsDay; // 1=월..7=일
-    return {
-      month,
-      day,
-      dow,
-      dayName: DAY_NAMES_KO[dow] ?? "",
-      defaultMeetingLabel: FIELD_MEETING_LABELS[dow] ?? "",
-    };
-  }, []);
 
   function renderTodayFieldServiceBanner() {
     const { month, day, dow, dayName, defaultMeetingLabel } = todayMeta;
