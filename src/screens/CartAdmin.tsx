@@ -28,7 +28,6 @@ import { friendlyError } from "../errors";
 import { matchName } from "../chosung";
 import {
   extractCartConductorsFromPhoto,
-  GEMINI_KEY_STORAGE,
   type ExtractedConductorRow,
 } from "../extractCartConductors";
 
@@ -163,19 +162,11 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
   const [showBulkBox, setShowBulkBox] = useState(false);
   const [bulkText, setBulkText] = useState("");
 
-  // 사진 AI 자동 추출 상태
+  // 사진 무료 OCR 자동 추출 상태
   const [showPhotoBox, setShowPhotoBox] = useState(false);
-  const [geminiKey, setGeminiKey] = useState<string>(
-    () => localStorage.getItem(GEMINI_KEY_STORAGE) ?? ""
-  );
-  const [editingKey, setEditingKey] = useState<boolean>(
-    () => !(localStorage.getItem(GEMINI_KEY_STORAGE) ?? "").trim()
-  );
-  const [keyInput, setKeyInput] = useState<string>(
-    () => localStorage.getItem(GEMINI_KEY_STORAGE) ?? ""
-  );
   const [photoTargetMonth, setPhotoTargetMonth] = useState<string>(currentMonthYm);
   const [extractingPhoto, setExtractingPhoto] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState<string>("");
   const [photoPreviewRows, setPhotoPreviewRows] = useState<ExtractedConductorRow[] | null>(
     null
   );
@@ -447,19 +438,6 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     return result;
   }, [conductorMonth, schedules, todayYmd]);
 
-  function handleSaveGeminiKey() {
-    const trimmed = keyInput.trim();
-    if (!trimmed) {
-      setError("Gemini API 키를 입력해 주세요.");
-      return;
-    }
-    localStorage.setItem(GEMINI_KEY_STORAGE, trimmed);
-    setGeminiKey(trimmed);
-    setEditingKey(false);
-    setError("");
-    setMsg("Gemini API 키가 이 기기에 안전하게 저장되었습니다.");
-  }
-
   async function handlePickSchedulePhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (photoInputRef.current) photoInputRef.current.value = "";
@@ -467,16 +445,38 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
 
     const { year, month } = getMonthRange(photoTargetMonth);
     setExtractingPhoto(true);
+    setOcrProgress("이미지 준비 중…");
     setError("");
     setMsg("");
     setPhotoPreviewRows(null);
     try {
+      // 오타 자동 보정용 이름 사전 (승인 전도인 + 현재 등록된 인도자 + 주요 인도자)
+      const knownNames = Array.from(
+        new Set(
+          [
+            ...publishers.map((p) => p.name.trim()),
+            ...slotConductors.map((c) => c.conductor_name.trim()),
+            "김용훈",
+            "김윤건",
+            "김진기",
+            "김상철",
+            "최호운",
+            "박용진",
+            "최광득",
+            "강영출",
+            "김동근",
+            "이경복",
+          ].filter(Boolean)
+        )
+      );
+
       const extracted = await extractCartConductorsFromPhoto(
         file,
-        geminiKey,
         year,
         month,
-        schedules
+        schedules,
+        knownNames,
+        (status) => setOcrProgress(status)
       );
       const upcoming = extracted.filter((r) => r.service_date >= todayYmd);
       const skippedPast = extracted.length - upcoming.length;
@@ -485,19 +485,20 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
         setError(
           skippedPast > 0
             ? `${year}년 ${month}월 일정 ${skippedPast}건이 모두 이미 지난 날짜입니다. 대상 월을 확인해 주세요.`
-            : `${year}년 ${month}월 전시대 인도자를 찾지 못했습니다. 대상 월(${year}년 ${month}월)이 사진과 일치하는지 확인해 주세요.`
+            : `${year}년 ${month}월 전시대 일정을 찾지 못했습니다. 대상 월(${year}년 ${month}월)이 사진과 일치하는지 확인해 주세요.`
         );
       } else {
         setPhotoPreviewRows(upcoming);
         setMsg(
           `사진에서 ${upcoming.length}건을 읽어왔습니다.${
             skippedPast > 0 ? ` (지난 날짜 ${skippedPast}건 자동 제외)` : ""
-          } 아래 내용을 확인 후 '일괄 저장'을 눌러 주세요.`
+          } 오타나 빈 칸이 있으면 수정 후 '일괄 저장'을 눌러 주세요.`
         );
       }
     } catch (err) {
       setError(friendlyError(err));
     }
+    setOcrProgress("");
     setExtractingPhoto(false);
   }
 
@@ -1034,147 +1035,60 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
       {showPhotoBox && (
         <div className="card" style={{ marginBottom: 14 }}>
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>
-            📷 봉사 일정표 사진으로 자동 입력
+            📷 봉사 일정표 사진으로 자동 입력 (무료 · 설정 불필요)
           </div>
           <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>
-            월간 봉사 일정표 사진을 선택하면 AI가 등록된 전시대 시간대 인도자만 자동으로 읽어옵니다.
+            월간 봉사 일정표 사진을 선택하면 별도 설정 없이 앱에서 바로 전시대 인도자와
+            상가봉사 주간(목 저녁·토 오후 휴무)을 읽어옵니다.
           </div>
 
-          {/* Step 1: Gemini API 키 설정 (최초 1회) */}
-          {editingKey || !geminiKey.trim() ? (
-            <div
-              style={{
-                padding: 10,
-                borderRadius: 8,
-                background: "var(--c-surface)",
-                border: "1px solid var(--c-border)",
-                marginBottom: 10,
-              }}
-            >
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
-                🔑 최초 1회: 무료 Gemini API 키 연결
-              </div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>
-                1){" "}
-                <a
-                  href="https://aistudio.google.com/apikey"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: "var(--c-primary)", textDecoration: "underline" }}
-                >
-                  Google AI Studio에서 무료 API 키 발급
-                </a>
-                <br />
-                2) 발급받은 키를 아래에 붙여넣고 저장하세요. (이 기기에만 안전하게 저장됩니다)
-              </div>
-              <div className="row" style={{ gap: 6 }}>
-                <input
-                  type="password"
-                  value={keyInput}
-                  onChange={(e) => setKeyInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSaveGeminiKey()}
-                  placeholder="AIza... 로 시작하는 API 키 입력"
-                  style={{ flex: 1 }}
-                />
-                <button
-                  className="btn-primary"
-                  style={{ width: "auto", padding: "6px 12px", minHeight: 0, fontSize: 13 }}
-                  onClick={handleSaveGeminiKey}
-                >
-                  키 저장
-                </button>
-                {geminiKey.trim() && (
-                  <button
-                    className="btn-line"
-                    style={{ padding: "6px 10px", minHeight: 0, fontSize: 13 }}
-                    onClick={() => {
-                      setKeyInput(geminiKey);
-                      setEditingKey(false);
-                    }}
-                  >
-                    취소
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div
-              className="row-between"
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                background: "var(--c-surface)",
-                border: "1px solid var(--c-border)",
-                marginBottom: 10,
-                fontSize: 13,
-              }}
-            >
-              <span style={{ color: "#15803d", fontWeight: 600 }}>✅ AI 키 연결됨</span>
+          <div
+            className="row-between"
+            style={{ marginBottom: 10, alignItems: "center", gap: 8 }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 600 }}>사진의 대상 월:</span>
+            <div className="row" style={{ gap: 6, alignItems: "center" }}>
               <button
                 className="btn-line"
-                style={{ padding: "3px 8px", minHeight: 0, fontSize: 12 }}
-                onClick={() => {
-                  setKeyInput(geminiKey);
-                  setEditingKey(true);
-                }}
+                style={{ padding: "4px 8px", minHeight: 0, fontSize: 12 }}
+                disabled={extractingPhoto || photoTargetMonth <= currentMonthYm}
+                onClick={() => setPhotoTargetMonth((m) => shiftYearMonth(m, -1))}
               >
-                키 변경
+                ◀
+              </button>
+              <strong style={{ fontSize: 14, minWidth: 88, textAlign: "center" }}>
+                {(() => {
+                  const { year, month } = getMonthRange(photoTargetMonth);
+                  return `${year}년 ${month}월`;
+                })()}
+              </strong>
+              <button
+                className="btn-line"
+                style={{ padding: "4px 8px", minHeight: 0, fontSize: 12 }}
+                disabled={extractingPhoto}
+                onClick={() => setPhotoTargetMonth((m) => shiftYearMonth(m, 1))}
+              >
+                ▶
               </button>
             </div>
-          )}
+          </div>
 
-          {/* Step 2: 사진 대상 월 선택 및 파일 업로드 */}
-          {geminiKey.trim() && !editingKey && (
-            <>
-              <div
-                className="row-between"
-                style={{ marginBottom: 10, alignItems: "center", gap: 8 }}
-              >
-                <span style={{ fontSize: 13, fontWeight: 600 }}>사진의 대상 월:</span>
-                <div className="row" style={{ gap: 6, alignItems: "center" }}>
-                  <button
-                    className="btn-line"
-                    style={{ padding: "4px 8px", minHeight: 0, fontSize: 12 }}
-                    disabled={extractingPhoto || photoTargetMonth <= currentMonthYm}
-                    onClick={() => setPhotoTargetMonth((m) => shiftYearMonth(m, -1))}
-                  >
-                    ◀
-                  </button>
-                  <strong style={{ fontSize: 14, minWidth: 88, textAlign: "center" }}>
-                    {(() => {
-                      const { year, month } = getMonthRange(photoTargetMonth);
-                      return `${year}년 ${month}월`;
-                    })()}
-                  </strong>
-                  <button
-                    className="btn-line"
-                    style={{ padding: "4px 8px", minHeight: 0, fontSize: 12 }}
-                    disabled={extractingPhoto}
-                    onClick={() => setPhotoTargetMonth((m) => shiftYearMonth(m, 1))}
-                  >
-                    ▶
-                  </button>
-                </div>
-              </div>
-
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={handlePickSchedulePhoto}
-              />
-              <button
-                className="btn-primary"
-                disabled={extractingPhoto || busy}
-                onClick={() => photoInputRef.current?.click()}
-              >
-                {extractingPhoto
-                  ? "⏳ 사진에서 전시대 인도자 읽는 중…"
-                  : "📷 일정표 사진 선택하기"}
-              </button>
-            </>
-          )}
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={handlePickSchedulePhoto}
+          />
+          <button
+            className="btn-primary"
+            disabled={extractingPhoto || busy}
+            onClick={() => photoInputRef.current?.click()}
+          >
+            {extractingPhoto
+              ? `⏳ ${ocrProgress || "사진 읽는 중…"}`
+              : "📷 일정표 사진 선택하기"}
+          </button>
 
           {/* Step 3: 추출 결과 미리보기 & 수정 후 저장 */}
           {photoPreviewRows && photoPreviewRows.length > 0 && (

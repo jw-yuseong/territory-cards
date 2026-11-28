@@ -1,7 +1,5 @@
 import type { CartSchedule } from "./types";
 
-export const GEMINI_KEY_STORAGE = "jw_cart_gemini_api_key";
-
 export type ExtractedConductorRow = {
   schedule_id: string;
   service_date: string; // 'YYYY-MM-DD'
@@ -12,18 +10,8 @@ export type ExtractedConductorRow = {
   closure_reason: string;
 };
 
-const DAY_KO: Record<number, string> = {
-  1: "월요일",
-  2: "화요일",
-  3: "수요일",
-  4: "목요일",
-  5: "금요일",
-  6: "토요일",
-  7: "일요일",
-};
-
-/** 시간('18:00', '16:00', '14:00' 등)을 달력 표에서 흔히 쓰는 시간대 키워드로 설명 */
-function timePeriodHint(startTime: string): string {
+/** 시간('18:00', '16:00', '14:00' 등) -> '오전' | '오후' | '저녁' */
+function timePeriodOf(startTime: string): "오전" | "오후" | "저녁" {
   const h = Number(startTime.split(":")[0]) || 0;
   if (h < 12) return "오전";
   if (h < 17) return "오후";
@@ -37,38 +25,108 @@ function fmtYmd(d: Date): string {
   ).padStart(2, "0")}`;
 }
 
-/** 주어진 날짜('YYYY-MM-DD')가 속한 주의 월요일~일요일 Date 배열 반환 */
-function getWeekDatesMonToSun(ymd: string): Date[] {
-  const [y, m, d] = ymd.split("-").map(Number);
-  const dt = new Date(y, m - 1, d);
-  const jsDay = dt.getDay(); // 0=일..6=토
-  const isoDay = jsDay === 0 ? 7 : jsDay; // 1=월..7=일
-  const monday = new Date(y, m - 1, d - (isoDay - 1));
-  return Array.from({ length: 7 }, (_, i) => new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i));
-}
-
 /** 상가봉사 주간에 휴무 처리할 전시대 시간대인지 판별 (목요일 저녁, 토요일 오후) */
 function isBusinessTerritoryClosedSlot(s: CartSchedule): boolean {
   const hour = Number(s.start_time.split(":")[0]) || 0;
-  // 목요일(4) 저녁(17시 이후) 또는 토요일(6) 오후(12시 이후)
   if (s.day_of_week === 4 && hour >= 17) return true;
   if (s.day_of_week === 6 && hour >= 12) return true;
   return false;
 }
 
-/** 이미지를 최대 너비 1600px로 적절히 축소해 base64(JPEG/PNG)로 변환 */
-async function fileToBase64Image(file: File): Promise<{ base64: string; mimeType: string }> {
-  if (file.type === "image/png" && file.size <= 2 * 1024 * 1024) {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("이미지 파일을 읽지 못했습니다."));
-      reader.readAsDataURL(file);
-    });
-    const base64 = dataUrl.split(",")[1] ?? "";
-    return { base64, mimeType: "image/png" };
+/** 월요일 시작 기준 해당 연·월의 달력 주 배열 (각 주는 7일, 월~일) */
+function buildCalendarWeeks(year: number, month: number): Date[][] {
+  const first = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0).getDate();
+  const firstIso = first.getDay() === 0 ? 7 : first.getDay(); // 1=월..7=일
+  const startMonday = new Date(year, month - 1, 1 - (firstIso - 1));
+
+  const weeks: Date[][] = [];
+  let cursor = new Date(startMonday);
+  while (true) {
+    const week: Date[] = [];
+    for (let i = 0; i < 7; i++) {
+      week.push(new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + i));
+    }
+    weeks.push(week);
+    cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 7);
+    const lastOfMonth = new Date(year, month - 1, lastDay);
+    if (cursor.getTime() > lastOfMonth.getTime()) break;
+  }
+  return weeks;
+}
+
+/** 한글 문자열을 자모(초성·중성·종성) 배열로 분해 (OCR 오타 유사도 보정용) */
+function toJamo(str: string): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code >= 0xac00 && code <= 0xd7a3) {
+      const offset = code - 0xac00;
+      const cho = Math.floor(offset / 588);
+      const jung = Math.floor((offset % 588) / 28);
+      const jong = offset % 28;
+      out.push(cho, 100 + jung);
+      if (jong > 0) out.push(200 + jong);
+    } else {
+      out.push(1000 + code);
+    }
+  }
+  return out;
+}
+
+function levenshtein(a: number[], b: number[]): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      if (a[i - 1] === b[j - 1]) {
+        dp[j] = prev;
+      } else {
+        dp[j] = 1 + Math.min(prev, dp[j], dp[j - 1]);
+      }
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+/** OCR로 읽은 이름을 등록된 명단(승인 전도인·기존 인도자)과 자모 유사도로 자동 보정 */
+function autoCorrectName(raw: string, knownNames: string[]): string {
+  const cleaned = raw.replace(/[^가-힣]/g, "").replace(/형제$/, "");
+  if (!cleaned) return "";
+  if (knownNames.includes(cleaned)) return cleaned;
+  if (cleaned.length < 2 || knownNames.length === 0) return cleaned;
+
+  const rawJamo = toJamo(cleaned);
+  let bestName = cleaned;
+  let bestDist = Infinity;
+  let tie = false;
+
+  for (const candidate of knownNames) {
+    if (Math.abs(candidate.length - cleaned.length) > 1) continue;
+    const dist = levenshtein(rawJamo, toJamo(candidate));
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestName = candidate;
+      tie = false;
+    } else if (dist === bestDist) {
+      tie = true;
+    }
   }
 
+  // 자모 2개 이하 차이이고 유일한 최선 매칭일 때만 자동 교정
+  if (!tie && bestDist <= 2) {
+    return bestName;
+  }
+  return cleaned;
+}
+
+/** 이미지 파일을 로드해 원본 크기의 canvas 반환 */
+async function loadImageToCanvas(file: File): Promise<HTMLCanvasElement> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const el = new Image();
@@ -83,235 +141,392 @@ async function fileToBase64Image(file: File): Promise<{ base64: string; mimeType
     el.src = url;
   });
 
-  const maxW = 1600;
-  const scale = img.width > maxW ? maxW / img.width : 1;
-  const w = Math.round(img.width * scale);
-  const h = Math.round(img.height * scale);
-
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("이미지 처리 컨텍스트를 생성할 수 없습니다.");
-  ctx.drawImage(img, 0, 0, w, h);
-
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-  return { base64: dataUrl.split(",")[1] ?? "", mimeType: "image/jpeg" };
-}
-
-/** Gemini API 호출 (gemini-2.5-flash 우선, 실패 시 gemini-2.0-flash 폴백) */
-async function callGeminiVision(
-  apiKey: string,
-  prompt: string,
-  base64: string,
-  mimeType: string
-): Promise<string> {
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash"];
-  let lastError = "";
-
-  for (const model of models) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(
-      apiKey.trim()
-    )}`;
-
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: base64,
-                },
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: "application/json",
-        },
-      }),
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (typeof text === "string" && text.trim()) {
-        return text;
-      }
-      lastError = "AI 응답이 비어 있습니다.";
-      continue;
-    }
-
-    const errBody = await res.text().catch(() => "");
-    if (res.status === 400 || res.status === 401 || res.status === 403) {
-      throw new Error(
-        "Gemini API 키가 올바르지 않거나 권한이 없습니다. 키를 다시 확인해 주세요."
-      );
-    }
-    if (res.status === 429) {
-      throw new Error("AI 요청 한도를 잠시 초과했습니다. 1분 후 다시 시도해 주세요.");
-    }
-    lastError = `HTTP ${res.status}: ${errBody.slice(0, 120)}`;
-  }
-
-  throw new Error(`AI 분석에 실패했습니다. (${lastError})`);
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) throw new Error("이미지 캔버스를 생성할 수 없습니다.");
+  ctx.drawImage(img, 0, 0);
+  return canvas;
 }
 
 /**
- * 달력 일정표 사진에서 활성 전시대 시간표에 해당하는 인도자 형제 이름과
- * '상가봉사주간'(목요일 저녁·토요일 오후 전시대 휴무)을 자동 추출한다.
+ * 요일 헤더 바(어두운 남색/파랑/빨강 줄)의 하단 Y 좌표를 자동 탐지한다.
+ */
+function detectHeaderBottomY(canvas: HTMLCanvasElement): number {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const { width, height } = canvas;
+  const maxScanY = Math.floor(height * 0.45);
+  const imgData = ctx.getImageData(0, 0, width, maxScanY).data;
+
+  let bandStart = -1;
+  let bandEnd = -1;
+  let bestStart = -1;
+  let bestEnd = -1;
+
+  for (let y = 0; y < maxScanY; y++) {
+    let darkCount = 0;
+    const rowOff = y * width * 4;
+    for (let x = 0; x < width; x += 2) {
+      const idx = rowOff + x * 4;
+      const lum = 0.299 * imgData[idx] + 0.587 * imgData[idx + 1] + 0.114 * imgData[idx + 2];
+      if (lum < 135) darkCount++;
+    }
+    const darkRatio = darkCount / (width / 2);
+    if (darkRatio > 0.5) {
+      if (bandStart === -1) bandStart = y;
+      bandEnd = y;
+    } else if (bandStart !== -1) {
+      if (bandEnd - bandStart > bestEnd - bestStart) {
+        bestStart = bandStart;
+        bestEnd = bandEnd;
+      }
+      bandStart = -1;
+      bandEnd = -1;
+    }
+  }
+  if (bandStart !== -1 && bandEnd - bandStart > bestEnd - bestStart) {
+    bestStart = bandStart;
+    bestEnd = bandEnd;
+  }
+
+  return bestEnd > 0 ? bestEnd + 2 : 0;
+}
+
+/**
+ * 달력 본문(gridTop ~ height)이 실제로 몇 개 주 행(4, 5, 6 중 하나)으로 나뉘어 있는지
+ * 수평 경계선 정렬 점수로 자동 판별한다.
+ */
+function detectRowCount(
+  canvas: HTMLCanvasElement,
+  gridTop: number,
+  calendarWeekCount: number
+): number {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const { width, height } = canvas;
+  const bodyH = height - gridTop;
+  if (bodyH <= 50) return calendarWeekCount;
+
+  const imgData = ctx.getImageData(0, gridTop, width, bodyH).data;
+
+  // 각 y행이 가로 격자선/날짜띠 경계인지 점수 계산 (흰색이 아닌 픽셀 비율)
+  const lineScore = new Float32Array(bodyH);
+  for (let y = 0; y < bodyH; y++) {
+    let nonWhite = 0;
+    const rowOff = y * width * 4;
+    for (let x = 0; x < width; x += 3) {
+      const idx = rowOff + x * 4;
+      const r = imgData[idx];
+      const g = imgData[idx + 1];
+      const b = imgData[idx + 2];
+      // 연한 회색/파랑 격자선 또는 배경띠
+      if (r < 245 || g < 245 || b < 245) nonWhite++;
+    }
+    lineScore[y] = nonWhite / (width / 3);
+  }
+
+  // 후보 행 수 (달력 주 수와 5를 우선 후보로 평가)
+  const candidates = Array.from(new Set([calendarWeekCount, 5, 4, 6])).filter(
+    (n) => n >= 4 && n <= 6
+  );
+
+  let bestN = calendarWeekCount;
+  let bestScore = -1;
+
+  for (const n of candidates) {
+    const rowH = bodyH / n;
+    let total = 0;
+    for (let k = 1; k < n; k++) {
+      const expectedY = Math.round(k * rowH);
+      let peak = 0;
+      for (let dy = -6; dy <= 6; dy++) {
+        const yy = expectedY + dy;
+        if (yy >= 0 && yy < bodyH && lineScore[yy] > peak) {
+          peak = lineScore[yy];
+        }
+      }
+      total += peak;
+    }
+    const avg = total / (n - 1);
+    // 실제 달력 주 수와 같으면 미세 가산점
+    const adjusted = avg + (n === calendarWeekCount ? 0.04 : 0);
+    if (adjusted > bestScore) {
+      bestScore = adjusted;
+      bestN = n;
+    }
+  }
+
+  return bestN;
+}
+
+/** 셀 영역에 글자(어두운 픽셀)가 실제로 존재하는지 빠르게 확인 */
+function cellHasDarkText(
+  canvas: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number
+): boolean {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const x = Math.max(0, Math.floor(sx));
+  const y = Math.max(0, Math.floor(sy));
+  const w = Math.max(1, Math.min(canvas.width - x, Math.floor(sw)));
+  const h = Math.max(1, Math.min(canvas.height - y, Math.floor(sh)));
+  const data = ctx.getImageData(x, y, w, h).data;
+
+  let darkPixels = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    if (lum < 150) {
+      darkPixels++;
+      if (darkPixels >= 20) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 셀 영역을 3배 확대 + 고대비 흑백 처리 + 흰 여백 패딩한 OCR용 캔버스 생성
+ */
+function cropCellForOcr(
+  srcCanvas: HTMLCanvasElement,
+  sx: number,
+  sy: number,
+  sw: number,
+  sh: number
+): HTMLCanvasElement {
+  const scale = 3;
+  const pad = 24;
+  const dw = Math.max(1, Math.round(sw * scale));
+  const dh = Math.max(1, Math.round(sh * scale));
+
+  const out = document.createElement("canvas");
+  out.width = dw + pad * 2;
+  out.height = dh + pad * 2;
+  const ctx = out.getContext("2d", { willReadFrequently: true })!;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(srcCanvas, sx, sy, sw, sh, pad, pad, dw, dh);
+
+  // 고대비 그레이스케일 보정 (노란/회색 배경 제거 -> 깔끔한 검정 글씨)
+  const imgData = ctx.getImageData(0, 0, out.width, out.height);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    let v: number;
+    if (lum > 205) {
+      v = 255;
+    } else if (lum < 115) {
+      v = 0;
+    } else {
+      v = Math.round(((lum - 115) / (205 - 115)) * 255);
+    }
+    d[i] = v;
+    d[i + 1] = v;
+    d[i + 2] = v;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  return out;
+}
+
+/** OCR 텍스트에서 시간대('오전' | '오후' | '저녁')별 인도자 이름 추출 */
+function parsePeriodNamesFromCellText(
+  text: string,
+  knownNames: string[]
+): Partial<Record<"오전" | "오후" | "저녁", string>> {
+  const result: Partial<Record<"오전" | "오후" | "저녁", string>> = {};
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    // 콜론/세미콜론/공백 등 OCR 변형 허용
+    const m = line.match(
+      /^(오\s*[전진]|오\s*[후무푸추]|저\s*[녁넉낵럭닉녹])\s*[:;.\-\s]+\s*(.+)$/
+    );
+    if (!m) continue;
+
+    const rawPeriod = m[1].replace(/\s+/g, "");
+    let period: "오전" | "오후" | "저녁";
+    if (rawPeriod.startsWith("오") && /[전진]/.test(rawPeriod)) {
+      period = "오전";
+    } else if (rawPeriod.startsWith("오")) {
+      period = "오후";
+    } else {
+      period = "저녁";
+    }
+
+    const rawName = m[2].replace(/\s+/g, "").replace(/[^가-힣]/g, "");
+    if (!rawName || /특별모임|집단봉사|상가봉사/.test(rawName)) continue;
+
+    const corrected = autoCorrectName(rawName, knownNames);
+    if (corrected.length >= 2) {
+      result[period] = corrected;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * API 키 없이 브라우저 내장 무료 한글 OCR(Tesseract.js)로
+ * 달력 일정표 사진에서 전시대 인도자 및 '상가봉사주간'(목 저녁·토 오후 휴무)을 자동 추출한다.
  */
 export async function extractCartConductorsFromPhoto(
   file: File,
-  apiKey: string,
   year: number,
   month: number,
-  schedules: CartSchedule[]
+  schedules: CartSchedule[],
+  knownNames: string[] = [],
+  onProgress?: (statusText: string) => void
 ): Promise<ExtractedConductorRow[]> {
-  if (!apiKey.trim()) {
-    throw new Error("먼저 Gemini API 키를 입력해 저장해 주세요.");
-  }
   if (schedules.length === 0) {
     throw new Error("등록된 전시대 시간표가 없습니다.");
   }
 
-  const { base64, mimeType } = await fileToBase64Image(file);
+  onProgress?.("이미지 분석 준비 중…");
+  const srcCanvas = await loadImageToCanvas(file);
+  const gridTop = detectHeaderBottomY(srcCanvas);
+  const calendarWeeks = buildCalendarWeeks(year, month);
+  const rowCount = detectRowCount(srcCanvas, gridTop, calendarWeeks.length);
+  const usableWeeks = calendarWeeks.slice(0, rowCount);
 
-  const scheduleDesc = schedules
-    .map((s) => {
-      const day = DAY_KO[s.day_of_week] ?? "";
-      const period = timePeriodHint(s.start_time);
-      return `- ${day} ${period} (start_time: "${s.start_time.slice(0, 5)}", 표시: ${s.time_label})`;
-    })
-    .join("\n");
+  const colW = srcCanvas.width / 7;
+  const rowH = (srcCanvas.height - gridTop) / rowCount;
 
-  const mm = String(month).padStart(2, "0");
+  // OCR 대상 셀 목록 구성: (1) 월요일(상가봉사주간 감지용) + (2) 활성 전시대 요일 셀
+  const activeDows = new Set(schedules.map((s) => s.day_of_week));
 
-  const prompt = `당신은 한국어 월간 봉사 일정표(달력 표) 이미지를 정확하게 읽는 도우미입니다.
-이 일정표는 **${year}년 ${month}월** 달력입니다.
-표 안에는 호별봉사 인도자, 전시대 봉사 인도자, 그리고 '상가봉사주간' 같은 특별 주간 표시가 함께 적혀 있습니다.
-
-당신은 다음 두 가지를 정확히 추출해야 합니다:
-(A) 아래에 지정된 **전시대 봉사 시간대**의 인도자 이름:
-${scheduleDesc}
-(B) 달력에서 **"상가봉사주간"** (또는 "상가봉사 주간", "상가봉사")이라고 적힌 날짜(보통 해당 주 월요일 칸에 적혀 있음)
-
-규칙:
-1. 달력에서 ${year}년 ${month}월에 해당하는 날짜(1일~말일)만 읽으세요. 이전 달/다음 달의 흐린 날짜 칸은 무시하세요.
-2. 각 날짜 칸 안에 적힌 "오전:", "오후:", "저녁:" 라벨을 정확히 구분하여, 위 지정된 전시대 봉사 요일과 시간대(오전/오후/저녁)에 일치하는 인도자 이름만 conductors에 추출하세요.
-3. 예를 들어 화요일 칸에 "오전: 강영출 / 저녁: 김용훈"이 있고 전시대 일정이 "화요일 저녁(18:00)"이라면 "김용훈"만 추출하고 "강영출"은 무시합니다.
-4. 토요일 칸에 "오전: 김동근 / 오후: 최호운" 또는 "특별모임 / 오후: 박용진"이 있고 전시대 일정이 "토요일 오후(14:00)"라면 "최호운", "박용진"만 추출합니다.
-5. "특별모임", "집단봉사", "상가봉사주간" 같은 행사 문구는 인도자 이름이 아니므로 conductors에 넣지 마세요.
-6. 인도자 이름에 "형제"가 붙어 있으면 제거하고 순수 한글 성명만 넣으세요.
-7. 달력의 어느 주(보통 마지막 주 월요일 칸)에 "상가봉사주간"이 적혀 있으면, 그 칸의 날짜(YYYY-MM-DD)를 business_territory_weeks 배열에 넣으세요. 없으면 빈 배열 []을 넣으세요.
-8. 반드시 아래 형식의 JSON 객체만 출력하세요:
-{
-  "conductors": [
-    {"service_date": "${year}-${mm}-03", "start_time": "18:00", "conductor_name": "김용훈"}
-  ],
-  "business_territory_weeks": ["${year}-${mm}-23"]
-}`;
-
-  const rawText = await callGeminiVision(apiKey, prompt, base64, mimeType);
-
-  let parsed: unknown;
-  try {
-    const cleaned = rawText
-      .trim()
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/, "");
-    parsed = JSON.parse(cleaned);
-  } catch {
-    throw new Error("AI가 반환한 결과를 해석하지 못했습니다. 사진을 다시 시도해 주세요.");
-  }
-
-  let rawConductors: unknown[] = [];
-  let rawBizWeeks: unknown[] = [];
-
-  if (Array.isArray(parsed)) {
-    rawConductors = parsed;
-  } else if (parsed && typeof parsed === "object") {
-    const obj = parsed as Record<string, unknown>;
-    if (Array.isArray(obj.conductors)) rawConductors = obj.conductors;
-    if (Array.isArray(obj.business_territory_weeks)) rawBizWeeks = obj.business_territory_weeks;
-  } else {
-    throw new Error("AI 응답 형식이 올바르지 않습니다.");
-  }
-
-  const byKey = new Map<string, ExtractedConductorRow>();
-
-  // 1) AI가 추출한 일반 전시대 인도자 반영
-  for (const item of rawConductors) {
-    if (!item || typeof item !== "object") continue;
-    const rec = item as Record<string, unknown>;
-    const serviceDate = String(rec.service_date ?? "").trim();
-    const rawTime = String(rec.start_time ?? "").trim();
-    const rawName = String(rec.conductor_name ?? "")
-      .trim()
-      .replace(/\s*형제$/, "");
-
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(serviceDate) || !rawName) continue;
-    const [hStr, mStr] = rawTime.split(":");
-    if (hStr === undefined || mStr === undefined) continue;
-    const startTimeNorm = `${String(Number(hStr)).padStart(2, "0")}:${mStr.slice(0, 2)}`;
-
-    const [yy, mon, dd] = serviceDate.split("-").map(Number);
-    if (yy !== year || mon !== month) continue;
-    const jsDay = new Date(yy, mon - 1, dd).getDay();
-    const dow = jsDay === 0 ? 7 : jsDay;
-
-    const matched = schedules.find(
-      (s) => s.day_of_week === dow && s.start_time.slice(0, 5) === startTimeNorm
-    );
-    if (!matched) continue;
-
-    const key = `${matched.id}:${serviceDate}`;
-    byKey.set(key, {
-      schedule_id: matched.id,
-      service_date: serviceDate,
-      start_time: startTimeNorm,
-      day_of_week: dow,
-      conductor_name: rawName,
-      is_closed: false,
-      closure_reason: "",
-    });
-  }
-
-  // 2) 상가봉사 주간 감지 시 해당 주(월~일)의 목요일 저녁·토요일 오후를 자동으로 휴무 처리
-  for (const rawDate of rawBizWeeks) {
-    const ymd = String(rawDate ?? "").trim();
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) continue;
-    const weekDates = getWeekDatesMonToSun(ymd);
-    for (const dt of weekDates) {
-      if (dt.getFullYear() !== year || dt.getMonth() + 1 !== month) continue;
-      const jsDay = dt.getDay();
-      const dow = jsDay === 0 ? 7 : jsDay;
-      const serviceDate = fmtYmd(dt);
-
-      for (const s of schedules) {
-        if (s.day_of_week !== dow) continue;
-        if (!isBusinessTerritoryClosedSlot(s)) continue;
-        const key = `${s.id}:${serviceDate}`;
-        byKey.set(key, {
-          schedule_id: s.id,
-          service_date: serviceDate,
-          start_time: s.start_time.slice(0, 5),
-          day_of_week: dow,
-          conductor_name: "",
-          is_closed: true,
-          closure_reason: "상가봉사 주간",
-        });
-      }
+  const mondayTargets: { weekIdx: number; sx: number; sy: number; sw: number; sh: number }[] = [];
+  for (let wIdx = 0; wIdx < usableWeeks.length; wIdx++) {
+    const sx = 4;
+    const sy = gridTop + wIdx * rowH + rowH * 0.16;
+    const sw = colW - 8;
+    const sh = rowH * 0.8;
+    if (cellHasDarkText(srcCanvas, sx, sy, sw, sh)) {
+      mondayTargets.push({ weekIdx: wIdx, sx, sy, sw, sh });
     }
   }
 
-  const results = Array.from(byKey.values());
+  const dayTargets: {
+    weekIdx: number;
+    dow: number;
+    serviceDate: string;
+    sx: number;
+    sy: number;
+    sw: number;
+    sh: number;
+  }[] = [];
+
+  for (let wIdx = 0; wIdx < usableWeeks.length; wIdx++) {
+    const week = usableWeeks[wIdx];
+    for (let col = 0; col < 7; col++) {
+      const dow = col + 1; // 1=월..7=일
+      if (!activeDows.has(dow)) continue;
+      const dt = week[col];
+      if (dt.getFullYear() !== year || dt.getMonth() + 1 !== month) continue;
+
+      const sx = col * colW + 4;
+      const sy = gridTop + wIdx * rowH + rowH * 0.22; // 상단 날짜 숫자 영역 제외
+      const sw = colW - 8;
+      const sh = rowH * 0.74;
+      dayTargets.push({
+        weekIdx: wIdx,
+        dow,
+        serviceDate: fmtYmd(dt),
+        sx,
+        sy,
+        sw,
+        sh,
+      });
+    }
+  }
+
+  const totalSteps = mondayTargets.length + dayTargets.length;
+  onProgress?.("한글 인식 엔진 불러오는 중… (최초 1회 약 10초 소요)");
+
+  const { createWorker } = await import("tesseract.js");
+  const worker = await createWorker("kor", 1, {
+    logger: (m) => {
+      if (m.status === "loading language traineddata") {
+        const pct = Math.round((m.progress || 0) * 100);
+        onProgress?.(`한글 인식 데이터 다운로드 중… (${pct}%)`);
+      }
+    },
+  });
+
+  const businessWeekSet = new Set<number>();
+  const results: ExtractedConductorRow[] = [];
+  let doneSteps = 0;
+
+  try {
+    // 1) 월요일 칸에서 '상가봉사주간' 감지
+    for (const mt of mondayTargets) {
+      doneSteps++;
+      onProgress?.(`일정표 읽는 중… (${doneSteps} / ${totalSteps})`);
+      const cellCanvas = cropCellForOcr(srcCanvas, mt.sx, mt.sy, mt.sw, mt.sh);
+      const { data } = await worker.recognize(cellCanvas);
+      const compact = (data.text || "").replace(/\s+/g, "");
+      if (/상가|봉사주간|상가봉사/.test(compact)) {
+        businessWeekSet.add(mt.weekIdx);
+      }
+    }
+
+    // 2) 활성 전시대 요일 칸 OCR 및 시간대 매칭
+    for (const dt of dayTargets) {
+      doneSteps++;
+      onProgress?.(`일정표 읽는 중… (${doneSteps} / ${totalSteps})`);
+
+      const daySchedules = schedules
+        .filter((s) => s.day_of_week === dt.dow)
+        .sort((a, b) => a.start_time.localeCompare(b.start_time));
+
+      const isBizWeek = businessWeekSet.has(dt.weekIdx);
+      const needOcrSchedules = daySchedules.filter(
+        (s) => !(isBizWeek && isBusinessTerritoryClosedSlot(s))
+      );
+
+      let periodMap: Partial<Record<"오전" | "오후" | "저녁", string>> = {};
+      if (needOcrSchedules.length > 0 && cellHasDarkText(srcCanvas, dt.sx, dt.sy, dt.sw, dt.sh)) {
+        const cellCanvas = cropCellForOcr(srcCanvas, dt.sx, dt.sy, dt.sw, dt.sh);
+        const { data } = await worker.recognize(cellCanvas);
+        periodMap = parsePeriodNamesFromCellText(data.text || "", knownNames);
+      }
+
+      for (const s of daySchedules) {
+        if (isBizWeek && isBusinessTerritoryClosedSlot(s)) {
+          results.push({
+            schedule_id: s.id,
+            service_date: dt.serviceDate,
+            start_time: s.start_time.slice(0, 5),
+            day_of_week: dt.dow,
+            conductor_name: "",
+            is_closed: true,
+            closure_reason: "상가봉사 주간",
+          });
+        } else {
+          const period = timePeriodOf(s.start_time);
+          const name = periodMap[period] ?? "";
+          results.push({
+            schedule_id: s.id,
+            service_date: dt.serviceDate,
+            start_time: s.start_time.slice(0, 5),
+            day_of_week: dt.dow,
+            conductor_name: name,
+            is_closed: false,
+            closure_reason: "",
+          });
+        }
+      }
+    }
+  } finally {
+    await worker.terminate().catch(() => {});
+  }
+
   results.sort((a, b) =>
     a.service_date === b.service_date
       ? a.start_time.localeCompare(b.start_time)
