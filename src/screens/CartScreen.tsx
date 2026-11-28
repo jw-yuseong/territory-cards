@@ -6,6 +6,7 @@ import {
   fetchCartLocations,
   fetchCartPublishers,
   fetchCartSchedules,
+  fetchCartSlotConductors,
   fetchCartTeamPlans,
 } from "../api";
 import type {
@@ -13,6 +14,7 @@ import type {
   CartLocation,
   CartPublisher,
   CartSchedule,
+  CartSlotConductor,
   CartTeamPlan,
 } from "../types";
 import { friendlyError } from "../errors";
@@ -231,6 +233,7 @@ export default function CartScreen({
   const [publishers, setPublishers] = useState<CartPublisher[]>([]);
   const [applications, setApplications] = useState<CartApplication[]>([]);
   const [teamPlans, setTeamPlans] = useState<CartTeamPlan[]>([]);
+  const [slotConductors, setSlotConductors] = useState<CartSlotConductor[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -287,18 +290,20 @@ export default function CartScreen({
 
   async function loadAll(retried = false) {
     try {
-      const [sc, locs, ps, apps, plans] = await Promise.all([
+      const [sc, locs, ps, apps, plans, conds] = await Promise.all([
         fetchCartSchedules(),
         fetchCartLocations(),
         fetchCartPublishers(),
         fetchCartApplications(queryRange.startYmd, queryRange.endYmd),
         fetchCartTeamPlans(queryRange.threeMonthsAgoYmd, queryRange.endYmd),
+        fetchCartSlotConductors(queryRange.startYmd, queryRange.endYmd),
       ]);
       setSchedules(sc);
       setLocations(locs);
       setPublishers(ps);
       setApplications(apps);
       setTeamPlans(plans);
+      setSlotConductors(conds);
       setError("");
     } catch (e) {
       if (!retried && isAuthTokenError(e)) {
@@ -311,6 +316,15 @@ export default function CartScreen({
     }
     setLoading(false);
   }
+
+  /** 특정 일정·날짜에 배정된 전시대 인도자 형제 이름 조회 */
+  const conductorBySlot = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of slotConductors) {
+      map.set(`${c.schedule_id}:${c.service_date}`, c.conductor_name);
+    }
+    return map;
+  }, [slotConductors]);
 
   useEffect(() => {
     loadAll();
@@ -701,6 +715,7 @@ export default function CartScreen({
           key={`${selectedSchedule.id}-${serviceDate}`}
           schedule={selectedSchedule}
           serviceDate={serviceDate}
+          conductorName={conductorBySlot.get(`${selectedSchedule.id}:${serviceDate}`)}
           locations={locations}
           slotApplications={activeSlotApps}
           cancelledApplications={cancelledSlotApps}
@@ -755,6 +770,18 @@ export default function CartScreen({
           <div style={{ fontWeight: 700, fontSize: "var(--fs-lg)", marginBottom: 6 }}>
             {formatScheduleFullTitle(selectedSchedule)}
           </div>
+          {conductorBySlot.get(`${selectedSchedule.id}:${serviceDate}`) && (
+            <div
+              style={{
+                fontSize: "var(--fs-small)",
+                fontWeight: 700,
+                color: "#0f766e",
+                marginBottom: 6,
+              }}
+            >
+              👤 전시대 인도자: {conductorBySlot.get(`${selectedSchedule.id}:${serviceDate}`)} 형제
+            </div>
+          )}
           <div className="muted" style={{ fontSize: "var(--fs-small)" }}>
             {canPlanTeams
               ? `인도자 권한: 봉사 종료(${selectedSchedule.end_time})까지 전도인 추가 신청 및 취소 가능`
@@ -1172,11 +1199,25 @@ export default function CartScreen({
                     fontWeight: 700,
                     fontSize: "var(--fs-base)",
                     color: "var(--c-text)",
-                    marginBottom: 6,
+                    marginBottom: 4,
                   }}
                 >
                   {formatScheduleFullTitle(s)}
                 </div>
+
+                {/* 해당 날짜·시간대의 전시대 인도자 형제 표시 */}
+                {conductorBySlot.get(`${s.id}:${serviceDate}`) && (
+                  <div
+                    style={{
+                      fontSize: "var(--fs-small)",
+                      fontWeight: 700,
+                      color: "#0f766e",
+                      marginBottom: 6,
+                    }}
+                  >
+                    👤 인도자: {conductorBySlot.get(`${s.id}:${serviceDate}`)} 형제
+                  </div>
+                )}
 
                 {/* 이미 신청한 사람들 이름 작게 표시 */}
                 <div

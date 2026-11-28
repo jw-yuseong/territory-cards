@@ -126,6 +126,7 @@ function buildInitialDraftByLoc(
 export default function CartTeamPlanner({
   schedule,
   serviceDate,
+  conductorName,
   locations,
   slotApplications,
   cancelledApplications = [],
@@ -138,6 +139,7 @@ export default function CartTeamPlanner({
 }: {
   schedule: CartSchedule;
   serviceDate: string;
+  conductorName?: string;
   locations: CartLocation[];
   slotApplications: CartApplication[];
   cancelledApplications?: CartApplication[];
@@ -394,6 +396,11 @@ export default function CartTeamPlanner({
         <div style={{ fontWeight: 700, fontSize: "var(--fs-lg)" }}>
           {formatScheduleFullTitle(schedule)}
         </div>
+        {conductorName && (
+          <div style={{ marginTop: 4, fontSize: "var(--fs-small)", fontWeight: 700, color: "var(--c-primary)" }}>
+            👤 전시대 인도자: {conductorName} 형제
+          </div>
+        )}
       </div>
 
       {/* 이 시간대 신청한 전도인 현황 (배정 여부 및 최근 3개월 참여 횟수 표시) */}

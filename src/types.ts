@@ -227,3 +227,12 @@ export interface CartTeamPlan {
   teams: string[][]; // 각 조의 전도인 이름 배열 (2명 또는 3명)
   updated_at: string;
 }
+
+
+export interface CartSlotConductor {
+  id: string;
+  schedule_id: string;
+  service_date: string; // 'YYYY-MM-DD'
+  conductor_name: string;
+  updated_at: string;
+}

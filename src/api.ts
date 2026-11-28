@@ -1530,3 +1530,76 @@ export async function deleteCartTeamPlan(
     .match({ schedule_id: scheduleId, service_date: serviceDate, location_id: locationId });
   if (error) throw new Error(error.message);
 }
+
+
+// ---- 날짜·시간대별 전시대 인도자 (CartSlotConductor) ----
+
+import type { CartSlotConductor } from "./types";
+
+export async function fetchCartSlotConductors(
+  startDate: string,
+  endDate: string
+): Promise<CartSlotConductor[]> {
+  const { data, error } = await supabase
+    .from("cart_slot_conductors")
+    .select("id, schedule_id, service_date, conductor_name, updated_at")
+    .gte("service_date", startDate)
+    .lte("service_date", endDate)
+    .order("service_date");
+  if (error) {
+    console.warn("fetchCartSlotConductors failed (patch23 may not be applied yet):", error);
+    return [];
+  }
+  return (data ?? []) as CartSlotConductor[];
+}
+
+export async function upsertCartSlotConductor(
+  scheduleId: string,
+  serviceDate: string,
+  conductorName: string
+): Promise<void> {
+  const trimmed = conductorName.trim();
+  if (!trimmed) {
+    await deleteCartSlotConductor(scheduleId, serviceDate);
+    return;
+  }
+  const { error } = await supabase.from("cart_slot_conductors").upsert(
+    {
+      schedule_id: scheduleId,
+      service_date: serviceDate,
+      conductor_name: trimmed,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "schedule_id,service_date" }
+  );
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteCartSlotConductor(
+  scheduleId: string,
+  serviceDate: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("cart_slot_conductors")
+    .delete()
+    .match({ schedule_id: scheduleId, service_date: serviceDate });
+  if (error) throw new Error(error.message);
+}
+
+export async function bulkUpsertCartSlotConductors(
+  rows: { schedule_id: string; service_date: string; conductor_name: string }[]
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  const nowIso = new Date().toISOString();
+  const payload = rows.map((r) => ({
+    schedule_id: r.schedule_id,
+    service_date: r.service_date,
+    conductor_name: r.conductor_name.trim(),
+    updated_at: nowIso,
+  }));
+  const { error } = await supabase
+    .from("cart_slot_conductors")
+    .upsert(payload, { onConflict: "schedule_id,service_date" });
+  if (error) throw new Error(error.message);
+  return payload.length;
+}
