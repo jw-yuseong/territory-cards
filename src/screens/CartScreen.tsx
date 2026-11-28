@@ -317,11 +317,22 @@ export default function CartScreen({
     setLoading(false);
   }
 
-  /** 특정 일정·날짜에 배정된 전시대 인도자 형제 이름 조회 */
+  /** 특정 일정·날짜의 인도자 및 휴무 정보 조회 */
+  const slotInfoByKey = useMemo(() => {
+    const map = new Map<string, CartSlotConductor>();
+    for (const c of slotConductors) {
+      map.set(`${c.schedule_id}:${c.service_date}`, c);
+    }
+    return map;
+  }, [slotConductors]);
+
+  /** 특정 일정·날짜에 배정된 전시대 인도자 형제 이름 조회 (휴무 제외) */
   const conductorBySlot = useMemo(() => {
     const map = new Map<string, string>();
     for (const c of slotConductors) {
-      map.set(`${c.schedule_id}:${c.service_date}`, c.conductor_name);
+      if (!c.is_closed && c.conductor_name) {
+        map.set(`${c.schedule_id}:${c.service_date}`, c.conductor_name);
+      }
     }
     return map;
   }, [slotConductors]);
@@ -370,6 +381,19 @@ export default function CartScreen({
   }
 
   function handleSelectSchedule(s: CartSchedule, serviceDate: string) {
+    // 휴무(예: 상가봉사 주간)로 지정된 시간대는 모든 계정에서 신청·조 편성 차단
+    const slotInfo = slotInfoByKey.get(`${s.id}:${serviceDate}`);
+    if (slotInfo?.is_closed) {
+      const reason = slotInfo.closure_reason || "전시대 휴무";
+      setPopupMessage(
+        `🚫 ${reason} (전시대 없음)\n\n` +
+          `📌 선택한 일정:\n${fmtMonthDay(serviceDate)} ${formatScheduleFullTitle(s)}\n\n` +
+          `이 시간대는 '${reason}'으로 인해 전시대 봉사가 진행되지 않습니다.` +
+          (isAdmin ? `\n\n(관리자: '전시대 관리' 화면에서 휴무를 해제할 수 있습니다.)` : "")
+      );
+      return;
+    }
+
     // 봉사인도자 또는 구역관리자는 신청 시간 여부와 관계없이 곧바로 전시대 조 계획 화면으로 진입
     if (canPlanTeams) {
       setError("");
@@ -1125,6 +1149,9 @@ export default function CartScreen({
         </div>
       ) : (
         upcomingItems.map(({ schedule: s, serviceDate }) => {
+          const slotInfo = slotInfoByKey.get(`${s.id}:${serviceDate}`);
+          const isClosed = Boolean(slotInfo?.is_closed);
+          const closureReason = slotInfo?.closure_reason || "전시대 휴무";
           const win = checkApplicationWindow(serviceDate, s.start_time, now);
           const allSlotApps = applications.filter(
             (a) => a.schedule_id === s.id && a.service_date === serviceDate
@@ -1141,12 +1168,18 @@ export default function CartScreen({
               className="card-box"
               style={{
                 padding: 14,
-                borderColor: win.allowed || canPlanTeams ? "var(--c-primary)" : "var(--c-border)",
+                opacity: isClosed ? 0.72 : 1,
+                background: isClosed ? "var(--c-surface)" : undefined,
+                borderColor: isClosed
+                  ? "var(--c-border)"
+                  : win.allowed || canPlanTeams
+                  ? "var(--c-primary)"
+                  : "var(--c-border)",
               }}
             >
               <div
                 onClick={() => handleSelectSchedule(s, serviceDate)}
-                style={{ cursor: "pointer" }}
+                style={{ cursor: isClosed ? "not-allowed" : "pointer" }}
               >
                 <div
                   style={{
@@ -1161,35 +1194,51 @@ export default function CartScreen({
                     {fmtMonthDay(serviceDate)} ({DAY_NAMES[s.day_of_week]})
                   </span>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {canPlanTeams && (
-                      <span
-                        className="round-badge-2"
-                        style={{ padding: "3px 8px", fontSize: 12 }}
-                      >
-                        조 계획하기 →
-                      </span>
-                    )}
-                    {win.status === "open" ? (
-                      <span
-                        className="done-badge"
-                        style={{ background: "#16a34a", color: "#fff", padding: "3px 10px" }}
-                      >
-                        신청 가능
-                      </span>
-                    ) : win.status === "before" ? (
+                    {isClosed ? (
                       <span
                         className="caution-badge soft"
-                        style={{ background: "#64748b", color: "#fff", padding: "3px 10px" }}
+                        style={{
+                          background: "#b45309",
+                          color: "#fff",
+                          padding: "3px 10px",
+                          fontWeight: 700,
+                        }}
                       >
-                        전날부터 신청 가능
+                        🚫 {closureReason} (전시대 없음)
                       </span>
                     ) : (
-                      <span
-                        className="caution-badge soft"
-                        style={{ background: "#94a3b8", color: "#fff", padding: "3px 10px" }}
-                      >
-                        마감
-                      </span>
+                      <>
+                        {canPlanTeams && (
+                          <span
+                            className="round-badge-2"
+                            style={{ padding: "3px 8px", fontSize: 12 }}
+                          >
+                            조 계획하기 →
+                          </span>
+                        )}
+                        {win.status === "open" ? (
+                          <span
+                            className="done-badge"
+                            style={{ background: "#16a34a", color: "#fff", padding: "3px 10px" }}
+                          >
+                            신청 가능
+                          </span>
+                        ) : win.status === "before" ? (
+                          <span
+                            className="caution-badge soft"
+                            style={{ background: "#64748b", color: "#fff", padding: "3px 10px" }}
+                          >
+                            전날부터 신청 가능
+                          </span>
+                        ) : (
+                          <span
+                            className="caution-badge soft"
+                            style={{ background: "#94a3b8", color: "#fff", padding: "3px 10px" }}
+                          >
+                            마감
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
@@ -1198,83 +1247,98 @@ export default function CartScreen({
                   style={{
                     fontWeight: 700,
                     fontSize: "var(--fs-base)",
-                    color: "var(--c-text)",
+                    color: isClosed ? "var(--c-muted)" : "var(--c-text)",
+                    textDecoration: isClosed ? "line-through" : "none",
                     marginBottom: 4,
                   }}
                 >
                   {formatScheduleFullTitle(s)}
                 </div>
 
-                {/* 해당 날짜·시간대의 전시대 인도자 형제 표시 */}
-                {conductorBySlot.get(`${s.id}:${serviceDate}`) && (
+                {isClosed ? (
                   <div
                     style={{
                       fontSize: "var(--fs-small)",
-                      fontWeight: 700,
-                      color: "#0f766e",
-                      marginBottom: 6,
+                      color: "#b45309",
+                      fontWeight: 600,
                     }}
                   >
-                    👤 인도자: {conductorBySlot.get(`${s.id}:${serviceDate}`)} 형제
+                    {closureReason}으로 인해 이 시간대는 전시대 봉사가 없습니다.
                   </div>
-                )}
+                ) : (
+                  <>
+                    {/* 해당 날짜·시간대의 전시대 인도자 형제 표시 */}
+                    {conductorBySlot.get(`${s.id}:${serviceDate}`) && (
+                      <div
+                        style={{
+                          fontSize: "var(--fs-small)",
+                          fontWeight: 700,
+                          color: "#0f766e",
+                          marginBottom: 6,
+                        }}
+                      >
+                        👤 인도자: {conductorBySlot.get(`${s.id}:${serviceDate}`)} 형제
+                      </div>
+                    )}
 
-                {/* 이미 신청한 사람들 이름 작게 표시 */}
-                <div
-                  style={{
-                    fontSize: "var(--fs-small)",
-                    color: slotApps.length > 0 ? "var(--c-primary)" : "var(--c-muted)",
-                    fontWeight: slotApps.length > 0 ? 600 : 400,
-                  }}
-                >
-                  {slotApps.length > 0 ? (
-                    <>
-                      신청자 ({slotApps.length}명):{" "}
-                      {slotApps.map((a, idx) => {
-                        const cnt = threeMonthParticipationCounts.get(a.publisher_name.trim()) ?? 0;
-                        return (
+                    {/* 이미 신청한 사람들 이름 작게 표시 */}
+                    <div
+                      style={{
+                        fontSize: "var(--fs-small)",
+                        color: slotApps.length > 0 ? "var(--c-primary)" : "var(--c-muted)",
+                        fontWeight: slotApps.length > 0 ? 600 : 400,
+                      }}
+                    >
+                      {slotApps.length > 0 ? (
+                        <>
+                          신청자 ({slotApps.length}명):{" "}
+                          {slotApps.map((a, idx) => {
+                            const cnt = threeMonthParticipationCounts.get(a.publisher_name.trim()) ?? 0;
+                            return (
+                              <span key={a.id}>
+                                {idx > 0 ? ", " : ""}
+                                {a.publisher_name}
+                                {canPlanTeams && (
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 400,
+                                      color: "var(--c-muted)",
+                                      marginLeft: 2,
+                                    }}
+                                  >
+                                    ({cnt}회)
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </>
+                      ) : (
+                        "신청자 없음"
+                      )}
+                    </div>
+
+                    {/* 신청 취소자가 있는 경우 아래에 작게 표시 */}
+                    {cancelledApps.length > 0 && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "var(--c-muted)",
+                          marginTop: 4,
+                        }}
+                      >
+                        신청 취소자 ({cancelledApps.length}명):{" "}
+                        {cancelledApps.map((a, idx) => (
                           <span key={a.id}>
                             {idx > 0 ? ", " : ""}
-                            {a.publisher_name}
-                            {canPlanTeams && (
-                              <span
-                                style={{
-                                  fontSize: 11,
-                                  fontWeight: 400,
-                                  color: "var(--c-muted)",
-                                  marginLeft: 2,
-                                }}
-                              >
-                                ({cnt}회)
-                              </span>
-                            )}
+                            <span style={{ textDecoration: "line-through" }}>{a.publisher_name}</span>
+                            {a.cancel_reason ? `(${a.cancel_reason})` : ""}
                           </span>
-                        );
-                      })}
-                    </>
-                  ) : (
-                    "신청자 없음"
-                  )}
-                </div>
-
-                {/* 신청 취소자가 있는 경우 아래에 작게 표시 */}
-                {cancelledApps.length > 0 && (
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: "var(--c-muted)",
-                      marginTop: 4,
-                    }}
-                  >
-                    신청 취소자 ({cancelledApps.length}명):{" "}
-                    {cancelledApps.map((a, idx) => (
-                      <span key={a.id}>
-                        {idx > 0 ? ", " : ""}
-                        <span style={{ textDecoration: "line-through" }}>{a.publisher_name}</span>
-                        {a.cancel_reason ? `(${a.cancel_reason})` : ""}
-                      </span>
-                    ))}
-                  </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 

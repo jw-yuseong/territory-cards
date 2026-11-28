@@ -234,5 +234,7 @@ export interface CartSlotConductor {
   schedule_id: string;
   service_date: string; // 'YYYY-MM-DD'
   conductor_name: string;
+  is_closed?: boolean;
+  closure_reason?: string;
   updated_at: string;
 }

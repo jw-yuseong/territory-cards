@@ -1542,15 +1542,25 @@ export async function fetchCartSlotConductors(
 ): Promise<CartSlotConductor[]> {
   const { data, error } = await supabase
     .from("cart_slot_conductors")
+    .select("id, schedule_id, service_date, conductor_name, is_closed, closure_reason, updated_at")
+    .gte("service_date", startDate)
+    .lte("service_date", endDate)
+    .order("service_date");
+  if (!error) {
+    return (data ?? []) as CartSlotConductor[];
+  }
+  // patch24(is_closed 컬럼) 미적용 시 이전 컬럼만 조회해 호환 유지
+  const { data: legacy, error: legacyErr } = await supabase
+    .from("cart_slot_conductors")
     .select("id, schedule_id, service_date, conductor_name, updated_at")
     .gte("service_date", startDate)
     .lte("service_date", endDate)
     .order("service_date");
-  if (error) {
-    console.warn("fetchCartSlotConductors failed (patch23 may not be applied yet):", error);
+  if (legacyErr) {
+    console.warn("fetchCartSlotConductors failed (patch23 may not be applied yet):", legacyErr);
     return [];
   }
-  return (data ?? []) as CartSlotConductor[];
+  return (legacy ?? []) as CartSlotConductor[];
 }
 
 export async function upsertCartSlotConductor(
@@ -1568,6 +1578,33 @@ export async function upsertCartSlotConductor(
       schedule_id: scheduleId,
       service_date: serviceDate,
       conductor_name: trimmed,
+      is_closed: false,
+      closure_reason: "",
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "schedule_id,service_date" }
+  );
+  if (error) throw new Error(error.message);
+}
+
+/** 특정 날짜·시간대 전시대 휴무 지정/해제 (예: 상가봉사 주간) */
+export async function setCartSlotClosed(
+  scheduleId: string,
+  serviceDate: string,
+  isClosed: boolean,
+  closureReason = "상가봉사 주간"
+): Promise<void> {
+  if (!isClosed) {
+    await deleteCartSlotConductor(scheduleId, serviceDate);
+    return;
+  }
+  const { error } = await supabase.from("cart_slot_conductors").upsert(
+    {
+      schedule_id: scheduleId,
+      service_date: serviceDate,
+      conductor_name: "",
+      is_closed: true,
+      closure_reason: closureReason.trim() || "전시대 휴무",
       updated_at: new Date().toISOString(),
     },
     { onConflict: "schedule_id,service_date" }
@@ -1587,14 +1624,22 @@ export async function deleteCartSlotConductor(
 }
 
 export async function bulkUpsertCartSlotConductors(
-  rows: { schedule_id: string; service_date: string; conductor_name: string }[]
+  rows: {
+    schedule_id: string;
+    service_date: string;
+    conductor_name: string;
+    is_closed?: boolean;
+    closure_reason?: string;
+  }[]
 ): Promise<number> {
   if (rows.length === 0) return 0;
   const nowIso = new Date().toISOString();
   const payload = rows.map((r) => ({
     schedule_id: r.schedule_id,
     service_date: r.service_date,
-    conductor_name: r.conductor_name.trim(),
+    conductor_name: r.is_closed ? "" : r.conductor_name.trim(),
+    is_closed: Boolean(r.is_closed),
+    closure_reason: r.is_closed ? (r.closure_reason?.trim() || "상가봉사 주간") : "",
     updated_at: nowIso,
   }));
   const { error } = await supabase

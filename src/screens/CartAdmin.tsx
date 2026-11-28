@@ -13,6 +13,7 @@ import {
   fetchCartSchedules,
   fetchCartSlotConductors,
   removeCartPublisher,
+  setCartSlotClosed,
   updateCartLocation,
   updateCartSchedule,
   upsertCartSlotConductor,
@@ -405,10 +406,10 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     return publishers.filter((p) => matchName(p.name, q));
   }, [publishers, searchPub]);
 
-  const conductorBySlot = useMemo(() => {
-    const map = new Map<string, string>();
+  const slotInfoByKey = useMemo(() => {
+    const map = new Map<string, CartSlotConductor>();
     for (const c of slotConductors) {
-      map.set(`${c.schedule_id}:${c.service_date}`, c.conductor_name);
+      map.set(`${c.schedule_id}:${c.service_date}`, c);
     }
     return map;
   }, [slotConductors]);
@@ -506,12 +507,14 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
       .map((r) => ({
         schedule_id: r.schedule_id,
         service_date: r.service_date,
-        conductor_name: r.conductor_name.trim().replace(/\s*형제$/, ""),
+        conductor_name: r.is_closed ? "" : r.conductor_name.trim().replace(/\s*형제$/, ""),
+        is_closed: Boolean(r.is_closed),
+        closure_reason: r.is_closed ? (r.closure_reason || "상가봉사 주간") : "",
       }))
-      .filter((r) => r.conductor_name && r.service_date >= todayYmd);
+      .filter((r) => r.service_date >= todayYmd && (r.is_closed || Boolean(r.conductor_name)));
 
     if (valid.length === 0) {
-      setError("저장할 인도자 항목이 없습니다.");
+      setError("저장할 항목이 없습니다.");
       return;
     }
 
@@ -520,6 +523,8 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     setMsg("");
     try {
       await bulkUpsertCartSlotConductors(valid);
+      const closedCount = valid.filter((v) => v.is_closed).length;
+      const condCount = valid.length - closedCount;
       setPhotoPreviewRows(null);
       setShowPhotoBox(false);
       if (photoTargetMonth !== conductorMonth) {
@@ -527,7 +532,42 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
       } else {
         await reloadConductors(conductorMonth);
       }
-      setMsg(`사진에서 추출한 전시대 인도자 ${valid.length}건이 저장되었습니다.`);
+      setMsg(
+        `사진에서 추출한 인도자 ${condCount}건${
+          closedCount > 0 ? ` 및 휴무(상가봉사 주간) ${closedCount}건` : ""
+        }이 저장되었습니다.`
+      );
+    } catch (e) {
+      setError(friendlyError(e));
+    }
+    setBusy(false);
+  }
+
+  async function handleToggleClosed(
+    scheduleId: string,
+    serviceDate: string,
+    currentlyClosed: boolean
+  ) {
+    let reason = "상가봉사 주간";
+    if (!currentlyClosed) {
+      const input = window.prompt(
+        `${serviceDate} 전시대를 휴무(신청 불가)로 지정합니다.\n휴무 사유를 입력하세요:`,
+        "상가봉사 주간"
+      );
+      if (input === null) return;
+      reason = input.trim() || "전시대 휴무";
+    }
+    setBusy(true);
+    setError("");
+    setMsg("");
+    try {
+      await setCartSlotClosed(scheduleId, serviceDate, !currentlyClosed, reason);
+      setMsg(
+        !currentlyClosed
+          ? `${serviceDate} 일정이 '${reason}' 휴무(신청 불가)로 지정되었습니다.`
+          : `${serviceDate} 휴무가 해제되었습니다.`
+      );
+      await reloadConductors(conductorMonth);
     } catch (e) {
       setError(friendlyError(e));
     }
@@ -1162,21 +1202,59 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
                       >
                         {mm}/{dd} ({DAY_SHORT[row.day_of_week]}) {row.start_time}
                       </span>
-                      <input
-                        type="text"
-                        value={row.conductor_name}
-                        onChange={(e) => {
-                          const val = e.target.value;
+                      {row.is_closed ? (
+                        <span
+                          style={{
+                            flex: 1,
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: "#b45309",
+                            padding: "6px 8px",
+                            borderRadius: 6,
+                            background: "#fef3c7",
+                          }}
+                        >
+                          🚫 {row.closure_reason || "상가봉사 주간"} (전시대 없음)
+                        </span>
+                      ) : (
+                        <input
+                          type="text"
+                          value={row.conductor_name}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPhotoPreviewRows((prev) =>
+                              prev
+                                ? prev.map((r, i) =>
+                                    i === idx ? { ...r, conductor_name: val } : r
+                                  )
+                                : prev
+                            );
+                          }}
+                          style={{ flex: 1, minWidth: 70 }}
+                        />
+                      )}
+                      <button
+                        className="btn-line"
+                        style={{ padding: "4px 7px", minHeight: 0, fontSize: 11 }}
+                        onClick={() =>
                           setPhotoPreviewRows((prev) =>
                             prev
                               ? prev.map((r, i) =>
-                                  i === idx ? { ...r, conductor_name: val } : r
+                                  i === idx
+                                    ? {
+                                        ...r,
+                                        is_closed: !r.is_closed,
+                                        closure_reason: !r.is_closed ? "상가봉사 주간" : "",
+                                      }
+                                    : r
                                 )
                               : prev
-                          );
-                        }}
-                        style={{ flex: 1, minWidth: 70 }}
-                      />
+                          )
+                        }
+                        title={row.is_closed ? "휴무 해제하고 인도자 입력" : "이 시간대 휴무로 전환"}
+                      >
+                        {row.is_closed ? "해제" : "휴무"}
+                      </button>
                       <button
                         className="btn-line"
                         style={{
@@ -1314,14 +1392,22 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {monthlySlots.map((slot) => {
-            const assigned = conductorBySlot.get(slot.key);
+            const slotInfo = slotInfoByKey.get(slot.key);
+            const isClosed = Boolean(slotInfo?.is_closed);
+            const closureReason = slotInfo?.closure_reason || "전시대 휴무";
+            const assigned = !isClosed ? slotInfo?.conductor_name : undefined;
             const isEditing = editingConductorKey === slot.key;
             const monthNum = Number(slot.serviceDate.slice(5, 7));
             return (
               <div
                 key={slot.key}
                 className="card"
-                style={{ padding: "10px 12px", marginBottom: 0 }}
+                style={{
+                  padding: "10px 12px",
+                  marginBottom: 0,
+                  background: isClosed ? "#fffbeb" : undefined,
+                  borderColor: isClosed ? "#f59e0b" : undefined,
+                }}
               >
                 {isEditing ? (
                   <div className="row" style={{ gap: 6 }}>
@@ -1373,7 +1459,11 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
                         {slot.schedule.start_time.slice(0, 5)}
                       </span>
                       <div style={{ marginTop: 2, fontSize: 13 }}>
-                        {assigned ? (
+                        {isClosed ? (
+                          <span style={{ color: "#b45309", fontWeight: 700 }}>
+                            🚫 휴무 ({closureReason} · 신청 불가)
+                          </span>
+                        ) : assigned ? (
                           <span style={{ color: "var(--c-primary)", fontWeight: 700 }}>
                             👤 {assigned} 형제
                           </span>
@@ -1383,36 +1473,73 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
                       </div>
                     </div>
                     <div className="row" style={{ gap: 6, flexShrink: 0 }}>
-                      <button
-                        className="btn-line"
-                        style={{ padding: "5px 10px", minHeight: 0, fontSize: 13 }}
-                        disabled={busy}
-                        onClick={() => {
-                          setEditingConductorKey(slot.key);
-                          setEditingConductorName(assigned ?? "");
-                          setError("");
-                          setMsg("");
-                        }}
-                      >
-                        {assigned ? "변경" : "지정"}
-                      </button>
-                      {assigned && (
+                      {isClosed ? (
                         <button
                           className="btn-line"
                           style={{
                             padding: "5px 10px",
                             minHeight: 0,
                             fontSize: 13,
-                            color: "var(--c-danger)",
-                            borderColor: "var(--c-danger)",
+                            color: "#b45309",
+                            borderColor: "#f59e0b",
                           }}
                           disabled={busy}
                           onClick={() =>
-                            handleDeleteConductor(slot.schedule.id, slot.serviceDate)
+                            handleToggleClosed(slot.schedule.id, slot.serviceDate, true)
                           }
                         >
-                          삭제
+                          휴무 해제
                         </button>
+                      ) : (
+                        <>
+                          <button
+                            className="btn-line"
+                            style={{ padding: "5px 10px", minHeight: 0, fontSize: 13 }}
+                            disabled={busy}
+                            onClick={() => {
+                              setEditingConductorKey(slot.key);
+                              setEditingConductorName(assigned ?? "");
+                              setError("");
+                              setMsg("");
+                            }}
+                          >
+                            {assigned ? "변경" : "지정"}
+                          </button>
+                          <button
+                            className="btn-line"
+                            style={{
+                              padding: "5px 8px",
+                              minHeight: 0,
+                              fontSize: 12,
+                              color: "#b45309",
+                              borderColor: "#f59e0b",
+                            }}
+                            disabled={busy}
+                            onClick={() =>
+                              handleToggleClosed(slot.schedule.id, slot.serviceDate, false)
+                            }
+                          >
+                            휴무
+                          </button>
+                          {assigned && (
+                            <button
+                              className="btn-line"
+                              style={{
+                                padding: "5px 8px",
+                                minHeight: 0,
+                                fontSize: 12,
+                                color: "var(--c-danger)",
+                                borderColor: "var(--c-danger)",
+                              }}
+                              disabled={busy}
+                              onClick={() =>
+                                handleDeleteConductor(slot.schedule.id, slot.serviceDate)
+                              }
+                            >
+                              삭제
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
