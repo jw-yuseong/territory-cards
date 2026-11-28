@@ -1603,3 +1603,14 @@ export async function bulkUpsertCartSlotConductors(
   if (error) throw new Error(error.message);
   return payload.length;
 }
+
+/** 오늘(todayYmd) 이전 날짜의 전시대 인도자 배정 레코드를 자동 삭제 */
+export async function deletePastCartSlotConductors(todayYmd: string): Promise<void> {
+  const { error } = await supabase
+    .from("cart_slot_conductors")
+    .delete()
+    .lt("service_date", todayYmd);
+  if (error) {
+    console.warn("deletePastCartSlotConductors failed:", error);
+  }
+}
