@@ -514,13 +514,11 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     setPhotoPreviewRows(null);
     setPhotoPreviewFieldRows(null);
     try {
-      // 오타 자동 보정용 이름 사전 (검증된 회중 인도자 명단 + 승인 전도인 명단만 사용;
-      // 기존 저장된 일정의 오타가 사전을 오염시키지 않도록 slotConductors/fieldConductors는 제외)
+      // 오타 자동 보정용 이름 사전: 실제 회중 인도자 명단(conductors)만 사용해 불필요한 동명이인/오보정 방지
       const knownNames = Array.from(
         new Set(
           [
             ...congConductors,
-            ...publishers.map((p) => p.name.trim()),
             "김용훈",
             "김윤건",
             "김진기",

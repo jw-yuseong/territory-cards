@@ -134,29 +134,78 @@ function stripBatchim(str: string): string {
   return out;
 }
 
-function strLevenshtein(a: string, b: string): number {
+/** 한글 음절 분해: { cho, jung, jong } (한글이 아니면 null) */
+function splitSyllable(ch: string): { cho: number; jung: number; jong: number } | null {
+  const code = ch.charCodeAt(0);
+  if (code < 0xac00 || code > 0xd7a3) return null;
+  const offset = code - 0xac00;
+  return {
+    cho: Math.floor(offset / 588),
+    jung: Math.floor((offset % 588) / 28),
+    jong: offset % 28,
+  };
+}
+
+// OCR에서 시각적으로 자주 혼동되는 초성 쌍 (0:ㄱ, 2:ㄴ, 3:ㄷ, 5:ㄹ, 6:ㅁ, 7:ㅂ, 9:ㅅ, 11:ㅇ, 12:ㅈ, 14:ㅊ, 15:ㅋ, 16:ㅌ, 17:ㅍ, 18:ㅎ)
+const SIMILAR_CHO_PAIRS = new Set([
+  "0-9", "9-0", "0-12", "12-0", "0-15", "15-0",
+  "9-12", "12-9", "12-14", "14-12",
+  "2-3", "3-2", "3-16", "16-3", "3-6", "6-3",
+  "6-7", "7-6", "7-17", "17-7",
+  "11-18", "18-11",
+]);
+
+// OCR에서 시각적으로 자주 혼동되는 중성 쌍 (0:ㅏ, 2:ㅑ, 4:ㅓ, 6:ㅕ, 8:ㅗ, 12:ㅛ, 13:ㅜ, 17:ㅠ, 18:ㅡ, 20:ㅣ, 1:ㅐ, 5:ㅔ)
+const SIMILAR_JUNG_PAIRS = new Set([
+  "0-2", "2-0", "4-6", "6-4", "8-12", "12-8", "13-17", "17-13",
+  "1-5", "5-1", "13-18", "18-13", "8-18", "18-8",
+]);
+
+/** 두 한글 음절 간 OCR 가중 거리 (0 = 완전 일치, 받침 누락은 낮은 가중치 0.35, 모음 일치는 높은 신뢰도) */
+function syllableOcrDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const sa = splitSyllable(a);
+  const sb = splitSyllable(b);
+  if (!sa || !sb) return 2.5;
+
+  let cost = 0;
+  if (sa.cho !== sb.cho) {
+    cost += SIMILAR_CHO_PAIRS.has(`${sa.cho}-${sb.cho}`) ? 0.45 : 1.1;
+  }
+  if (sa.jung !== sb.jung) {
+    cost += SIMILAR_JUNG_PAIRS.has(`${sa.jung}-${sb.jung}`) ? 0.5 : 1.3;
+  }
+  if (sa.jong !== sb.jong) {
+    // 작은 글씨에서 받침 누락·변형은 매우 흔하므로 낮은 가중치 적용
+    cost += 0.35;
+  }
+  return cost;
+}
+
+/** 두 한글 이름 간 음절 정렬 가중 거리 */
+function weightedHangulDistance(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
-  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i * 1.4;
+  for (let j = 0; j <= n; j++) dp[0][j] = j * 1.4;
+
   for (let i = 1; i <= m; i++) {
-    let prev = dp[0];
-    dp[0] = i;
     for (let j = 1; j <= n; j++) {
-      const tmp = dp[j];
-      if (a[i - 1] === b[j - 1]) {
-        dp[j] = prev;
-      } else {
-        dp[j] = 1 + Math.min(prev, dp[j], dp[j - 1]);
-      }
-      prev = tmp;
+      const sub = dp[i - 1][j - 1] + syllableOcrDistance(a[i - 1], b[j - 1]);
+      const del = dp[i - 1][j] + 1.4;
+      const ins = dp[i][j - 1] + 1.4;
+      dp[i][j] = Math.min(sub, del, ins);
     }
   }
-  return dp[n];
+  return dp[m][n];
 }
 
 /**
- * OCR로 읽은 이름을 회중 인도자·승인 전도인 명단과 초성·중성 우선 + 자모 유사도로 자동 보정
- * 예: '기과시므' (초성·중성 '기과시므' -> 앞 3글자 '기과시' == '김광식') -> '김광식'
+ * OCR로 읽은 이름을 회중 인도자·승인 전도인 명단과
+ * 1) 초성·중성 우선 일치 (예: '기과시므' -> '김광식')
+ * 2) 음절별 OCR 가중 거리 (받침 누락·시각적 유사 자음 보정, 예: '야그' -> '양승')
+ * 로 자동 보정한다.
  */
 function autoCorrectName(raw: string, knownNames: string[]): string {
   const cleaned = raw.replace(/[^가-힣]/g, "").replace(/형제$/, "");
@@ -167,7 +216,7 @@ function autoCorrectName(raw: string, knownNames: string[]): string {
   const rawCV = stripBatchim(cleaned);
   const rawJamo = toJamo(cleaned);
 
-  // 1단계: 초성+중성 완전 일치 또는 받침이 뒤로 밀린 1글자 초과(예: '기과시므' vs '기과시') 우선 탐색
+  // 1단계: 초성+중성 완전 일치 또는 받침이 뒤로 밀린 1글자 초과(예: '기과시므' vs '기과시')
   const cvMatches: string[] = [];
   for (const cand of knownNames) {
     if (cand.length < 2) continue;
@@ -184,7 +233,6 @@ function autoCorrectName(raw: string, knownNames: string[]): string {
     return cvMatches[0];
   }
   if (cvMatches.length > 1) {
-    // 초성+중성이 같은 후보가 여러 개면 자모 거리가 가장 가까운 유일 후보 선택
     let best = cvMatches[0];
     let bestD = Infinity;
     let tie = false;
@@ -201,35 +249,29 @@ function autoCorrectName(raw: string, knownNames: string[]): string {
     if (!tie) return best;
   }
 
-  // 2단계: 종합 점수 (초성+중성 거리 + 자모 거리) 기반 최적 후보 탐색
+  // 2단계: 음절별 OCR 가중 거리 (글자당 평균 거리 기준 — 2글자 이름 '양승'->'야그' 포함 완벽 지원)
   let bestName = cleaned;
-  let bestScore = Infinity;
-  let secondScore = Infinity;
+  let bestAvg = Infinity;
+  let secondAvg = Infinity;
 
   for (const candidate of knownNames) {
+    if (candidate.length < 2) continue;
     if (Math.abs(candidate.length - cleaned.length) > 1) continue;
-    const candCV = stripBatchim(candidate);
-    const cvDist = strLevenshtein(rawCV, candCV);
-    if (cvDist > 1) continue; // 초성+중성 자체가 2글자 이상 다르면 오보정 방지
 
-    const candJamo = toJamo(candidate);
-    const jamoDist = levenshtein(rawJamo, candJamo);
-    const maxJamo = Math.max(rawJamo.length, candJamo.length, 1);
-    const jamoRatio = jamoDist / maxJamo; // 0 = 완전 일치, 1 = 완전 다름
+    const dist = weightedHangulDistance(cleaned, candidate);
+    const avg = dist / Math.max(cleaned.length, candidate.length);
 
-    // 종합 점수 (낮을수록 유사)
-    const score = cvDist * 1.5 + jamoRatio * 3.0;
-    if (score < bestScore) {
-      secondScore = bestScore;
-      bestScore = score;
+    if (avg < bestAvg) {
+      secondAvg = bestAvg;
+      bestAvg = avg;
       bestName = candidate;
-    } else if (score < secondScore) {
-      secondScore = score;
+    } else if (avg < secondAvg) {
+      secondAvg = avg;
     }
   }
 
-  // 충분히 유사하고(점수 <= 2.35) 2등 후보와 명확한 차이가 있을 때만 자동 교정
-  if (bestScore <= 2.35 && secondScore - bestScore >= 0.25) {
+  // 글자당 평균 가중 거리 <= 0.72 이고, 2등 후보와 충분한 차이(>= 0.18)가 있을 때만 자동 교정
+  if (bestAvg <= 0.72 && secondAvg - bestAvg >= 0.18) {
     return bestName;
   }
   return cleaned;
