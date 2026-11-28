@@ -24,6 +24,7 @@ import CircuitReport from "./CircuitReport";
 import PasswordChange from "./PasswordChange";
 import DbBackup from "./DbBackup";
 import CartAdmin from "./CartAdmin";
+import FieldServiceAdmin from "./FieldServiceAdmin";
 import { friendlyError } from "../errors";
 
 export default function AdminScreen() {
@@ -44,6 +45,7 @@ export default function AdminScreen() {
   const [showPw, setShowPw] = useState(false); // 비밀번호 변경
   const [showBackup, setShowBackup] = useState(false); // DB 백업/리뉴얼
   const [showCartAdmin, setShowCartAdmin] = useState(false); // 전시대 관리 (시간표·승인 명단)
+  const [showFieldAdmin, setShowFieldAdmin] = useState(false); // 호별봉사 관리 (인도자·모임시간·특별행사)
   const [roundResetCard, setRoundResetCard] = useState<CardSummary | null>(null); // 회차 선택 초기화 대상
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<{ parsed: ParsedCard; file: File } | null>(null);
@@ -298,6 +300,9 @@ export default function AdminScreen() {
   if (showCartAdmin) {
     return <CartAdmin onBack={() => setShowCartAdmin(false)} />;
   }
+  if (showFieldAdmin) {
+    return <FieldServiceAdmin onBack={() => setShowFieldAdmin(false)} />;
+  }
 
   return (
     <div>
@@ -320,6 +325,13 @@ export default function AdminScreen() {
         onClick={() => setShowCartAdmin(true)}
       >
         🛒 전시대 관리 (요일·시간표, 장소 및 승인 명단)
+      </button>
+      <button
+        className="btn-line"
+        style={{ width: "100%", marginBottom: 10 }}
+        onClick={() => setShowFieldAdmin(true)}
+      >
+        🏠 호별봉사 관리 (인도자 · 모임 시간 · 특별 행사)
       </button>
       <button
         className="btn-line"

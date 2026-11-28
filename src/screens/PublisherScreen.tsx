@@ -296,8 +296,13 @@ export default function PublisherScreen() {
     const { month, day, dow, dayName, defaultMeetingLabel } = todayMeta;
     const dateHeader = `${month}월 ${day}일 (${dayName})`;
 
-    // 월요일 또는 '봉사 없음'으로 지정된 날
-    if (dow === 1 || todayFieldService?.special_type === "none") {
+    // 월요일(별도 등록된 일정/행사가 없는 경우) 또는 '봉사 없음'으로 지정된 날
+    const hasCustomMondaySchedule =
+      dow === 1 &&
+      todayFieldService !== null &&
+      todayFieldService.special_type !== "none" &&
+      (Boolean(todayFieldService.special_type) || Boolean(todayFieldService.conductor_name?.trim()));
+    if ((dow === 1 && !hasCustomMondaySchedule) || todayFieldService?.special_type === "none") {
       return (
         <div
           className="card-box"
