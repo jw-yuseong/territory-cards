@@ -118,31 +118,118 @@ function levenshtein(a: number[], b: number[]): number {
   return dp[n];
 }
 
-/** OCR로 읽은 이름을 등록된 명단(승인 전도인·기존 인도자)과 자모 유사도로 자동 보정 */
+/** 한글 문자열에서 받침(종성)을 제거한 초성+중성 문자열 반환 (예: '김광식' -> '기과시') */
+function stripBatchim(str: string): string {
+  let out = "";
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code >= 0xac00 && code <= 0xd7a3) {
+      const offset = code - 0xac00;
+      const base = offset - (offset % 28);
+      out += String.fromCharCode(0xac00 + base);
+    } else {
+      out += str[i];
+    }
+  }
+  return out;
+}
+
+function strLevenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      if (a[i - 1] === b[j - 1]) {
+        dp[j] = prev;
+      } else {
+        dp[j] = 1 + Math.min(prev, dp[j], dp[j - 1]);
+      }
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
+/**
+ * OCR로 읽은 이름을 회중 인도자·승인 전도인 명단과 초성·중성 우선 + 자모 유사도로 자동 보정
+ * 예: '기과시므' (초성·중성 '기과시므' -> 앞 3글자 '기과시' == '김광식') -> '김광식'
+ */
 function autoCorrectName(raw: string, knownNames: string[]): string {
   const cleaned = raw.replace(/[^가-힣]/g, "").replace(/형제$/, "");
   if (!cleaned) return "";
   if (knownNames.includes(cleaned)) return cleaned;
   if (cleaned.length < 2 || knownNames.length === 0) return cleaned;
 
+  const rawCV = stripBatchim(cleaned);
   const rawJamo = toJamo(cleaned);
+
+  // 1단계: 초성+중성 완전 일치 또는 받침이 뒤로 밀린 1글자 초과(예: '기과시므' vs '기과시') 우선 탐색
+  const cvMatches: string[] = [];
+  for (const cand of knownNames) {
+    if (cand.length < 2) continue;
+    const candCV = stripBatchim(cand);
+    if (
+      rawCV === candCV ||
+      (rawCV.length === candCV.length + 1 && rawCV.startsWith(candCV)) ||
+      (candCV.length === rawCV.length + 1 && candCV.startsWith(rawCV))
+    ) {
+      cvMatches.push(cand);
+    }
+  }
+  if (cvMatches.length === 1) {
+    return cvMatches[0];
+  }
+  if (cvMatches.length > 1) {
+    // 초성+중성이 같은 후보가 여러 개면 자모 거리가 가장 가까운 유일 후보 선택
+    let best = cvMatches[0];
+    let bestD = Infinity;
+    let tie = false;
+    for (const c of cvMatches) {
+      const d = levenshtein(rawJamo, toJamo(c));
+      if (d < bestD) {
+        bestD = d;
+        best = c;
+        tie = false;
+      } else if (d === bestD) {
+        tie = true;
+      }
+    }
+    if (!tie) return best;
+  }
+
+  // 2단계: 종합 점수 (초성+중성 거리 + 자모 거리) 기반 최적 후보 탐색
   let bestName = cleaned;
-  let bestDist = Infinity;
-  let tie = false;
+  let bestScore = Infinity;
+  let secondScore = Infinity;
 
   for (const candidate of knownNames) {
     if (Math.abs(candidate.length - cleaned.length) > 1) continue;
-    const dist = levenshtein(rawJamo, toJamo(candidate));
-    if (dist < bestDist) {
-      bestDist = dist;
+    const candCV = stripBatchim(candidate);
+    const cvDist = strLevenshtein(rawCV, candCV);
+    if (cvDist > 1) continue; // 초성+중성 자체가 2글자 이상 다르면 오보정 방지
+
+    const candJamo = toJamo(candidate);
+    const jamoDist = levenshtein(rawJamo, candJamo);
+    const maxJamo = Math.max(rawJamo.length, candJamo.length, 1);
+    const jamoRatio = jamoDist / maxJamo; // 0 = 완전 일치, 1 = 완전 다름
+
+    // 종합 점수 (낮을수록 유사)
+    const score = cvDist * 1.5 + jamoRatio * 3.0;
+    if (score < bestScore) {
+      secondScore = bestScore;
+      bestScore = score;
       bestName = candidate;
-      tie = false;
-    } else if (dist === bestDist) {
-      tie = true;
+    } else if (score < secondScore) {
+      secondScore = score;
     }
   }
 
-  if (!tie && bestDist <= 2) {
+  // 충분히 유사하고(점수 <= 2.35) 2등 후보와 명확한 차이가 있을 때만 자동 교정
+  if (bestScore <= 2.35 && secondScore - bestScore >= 0.25) {
     return bestName;
   }
   return cleaned;
@@ -298,7 +385,10 @@ function cellHasDarkText(
   return false;
 }
 
-/** 셀 영역을 3배 확대 + 고대비 흑백 처리 + 흰 여백 패딩한 OCR용 캔버스 생성 */
+/**
+ * 셀 영역에서 실제 글자가 있는 바운딩 박스를 타이트하게 잘라낸 뒤
+ * 4배 확대 + 받침 획을 보존하는 부드러운 대비 보정 + 흰 여백 패딩한 OCR용 캔버스 생성
+ */
 function cropCellForOcr(
   srcCanvas: HTMLCanvasElement,
   sx: number,
@@ -306,10 +396,56 @@ function cropCellForOcr(
   sw: number,
   sh: number
 ): HTMLCanvasElement {
-  const scale = 3;
-  const pad = 24;
-  const dw = Math.max(1, Math.round(sw * scale));
-  const dh = Math.max(1, Math.round(sh * scale));
+  const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true })!;
+  const x0 = Math.max(0, Math.floor(sx));
+  const y0 = Math.max(0, Math.floor(sy));
+  const w0 = Math.max(1, Math.min(srcCanvas.width - x0, Math.floor(sw)));
+  const h0 = Math.max(1, Math.min(srcCanvas.height - y0, Math.floor(sh)));
+
+  // 1) 셀 내부에서 실제 글자 픽셀(lum < 200)의 타이트한 영역 찾기
+  const raw = srcCtx.getImageData(x0, y0, w0, h0).data;
+  let minX = w0;
+  let minY = h0;
+  let maxX = 0;
+  let maxY = 0;
+  let found = false;
+
+  for (let y = 0; y < h0; y++) {
+    const rowOff = y * w0 * 4;
+    for (let x = 0; x < w0; x++) {
+      const idx = rowOff + x * 4;
+      const lum = 0.299 * raw[idx] + 0.587 * raw[idx + 1] + 0.114 * raw[idx + 2];
+      if (lum < 200) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        found = true;
+      }
+    }
+  }
+
+  let cropX = x0;
+  let cropY = y0;
+  let cropW = w0;
+  let cropH = h0;
+  if (found) {
+    const margin = 4;
+    const tx = Math.max(0, minX - margin);
+    const ty = Math.max(0, minY - margin);
+    const tx2 = Math.min(w0, maxX + 1 + margin);
+    const ty2 = Math.min(h0, maxY + 1 + margin);
+    cropX = x0 + tx;
+    cropY = y0 + ty;
+    cropW = Math.max(1, tx2 - tx);
+    cropH = Math.max(1, ty2 - ty);
+  }
+
+  // 2) 4배 확대 + 충분한 흰 여백 패딩
+  const scale = 4;
+  const pad = 32;
+  const dw = Math.max(1, Math.round(cropW * scale));
+  const dh = Math.max(1, Math.round(cropH * scale));
 
   const out = document.createElement("canvas");
   out.width = dw + pad * 2;
@@ -320,19 +456,20 @@ function cropCellForOcr(
   ctx.fillRect(0, 0, out.width, out.height);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(srcCanvas, sx, sy, sw, sh, pad, pad, dw, dh);
+  ctx.drawImage(srcCanvas, cropX, cropY, cropW, cropH, pad, pad, dw, dh);
 
+  // 3) 받침의 얇은 획이 날아가지 않도록 부드러운 그레이스케일 대비 보정
   const imgData = ctx.getImageData(0, 0, out.width, out.height);
   const d = imgData.data;
   for (let i = 0; i < d.length; i += 4) {
     const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
     let v: number;
-    if (lum > 205) {
+    if (lum > 235) {
       v = 255;
-    } else if (lum < 115) {
+    } else if (lum < 85) {
       v = 0;
     } else {
-      v = Math.round(((lum - 115) / (205 - 115)) * 255);
+      v = Math.round(((lum - 85) / (235 - 85)) * 255);
     }
     d[i] = v;
     d[i + 1] = v;
@@ -583,7 +720,7 @@ export async function extractCartConductorsFromPhoto(
   const totalSteps = mondayTargets.length + dayTargets.length;
   onProgress?.("한글 인식 엔진 불러오는 중… (최초 1회 약 10초 소요)");
 
-  const { createWorker } = await import("tesseract.js");
+  const { createWorker, PSM } = await import("tesseract.js");
   const worker = await createWorker("kor", 1, {
     logger: (m) => {
       if (m.status === "loading language traineddata") {
@@ -591,6 +728,9 @@ export async function extractCartConductorsFromPhoto(
         onProgress?.(`한글 인식 데이터 다운로드 중… (${pct}%)`);
       }
     },
+  });
+  await worker.setParameters({
+    tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
   });
 
   const businessWeekSet = new Set<number>();

@@ -15,6 +15,7 @@ import {
   fetchCartPublishers,
   fetchCartSchedules,
   fetchCartSlotConductors,
+  fetchConductors,
   fetchFieldServiceConductors,
   removeCartPublisher,
   setCartSlotClosed,
@@ -137,6 +138,7 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
   const [schedules, setSchedules] = useState<CartSchedule[]>([]);
   const [locations, setLocations] = useState<CartLocation[]>([]);
   const [publishers, setPublishers] = useState<CartPublisher[]>([]);
+  const [congConductors, setCongConductors] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -207,14 +209,16 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
 
   async function reload() {
     try {
-      const [sc, locs, ps] = await Promise.all([
+      const [sc, locs, ps, conds] = await Promise.all([
         fetchCartSchedules(),
         fetchCartLocations(),
         fetchCartPublishers(),
+        fetchConductors().catch(() => []),
       ]);
       setSchedules(sc);
       setLocations(locs);
       setPublishers(ps);
+      setCongConductors(conds.map((c) => c.name.trim()).filter(Boolean));
     } catch (e) {
       setError(friendlyError(e));
     }
@@ -510,13 +514,14 @@ export default function CartAdmin({ onBack }: { onBack?: () => void }) {
     setPhotoPreviewRows(null);
     setPhotoPreviewFieldRows(null);
     try {
-      // 오타 자동 보정용 이름 사전 (승인 전도인 + 기존 인도자 + 주요 인도자)
+      // 오타 자동 보정용 이름 사전 (회중 인도자 명단 우선 + 기존 인도자 + 승인 전도인)
       const knownNames = Array.from(
         new Set(
           [
-            ...publishers.map((p) => p.name.trim()),
+            ...congConductors,
             ...slotConductors.map((c) => c.conductor_name.trim()),
             ...fieldConductors.map((f) => f.conductor_name.trim()),
+            ...publishers.map((p) => p.name.trim()),
             "김용훈",
             "김윤건",
             "김진기",
